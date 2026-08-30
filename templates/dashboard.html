@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — FleetCare{% endblock %}
+
+{% block content %}
+  <h1>Dashboard</h1>
+  <p>Logged in as <strong>{{ user.email }}</strong>, role <strong>{{ user.get_role_display }}</strong>.</p>
+{% endblock %}
