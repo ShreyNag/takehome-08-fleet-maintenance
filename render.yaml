@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: fleetcare
+    runtime: python
+    plan: free
+    buildCommand: ./build.sh
+    startCommand: gunicorn fleetcare.wsgi:application
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: fleetcare.onrender.com
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://fleetcare.onrender.com
+      - key: DATABASE_URL
+        sync: false  # set manually to the Neon connection string, not stored in git
+      - key: PYTHON_VERSION
+        value: "3.12.9"
