@@ -10,3 +10,9 @@ venv/
 .env.*.local
 *.log
 .DS_Store
+
+# Django
+*.pyc
+db.sqlite3
+staticfiles/
+media/
