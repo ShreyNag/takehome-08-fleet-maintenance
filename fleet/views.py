@@ -9,6 +9,7 @@ from django.views.generic import CreateView, DetailView, ListView, UpdateView
 from accounts.mixins import FleetManagerRequiredMixin, ManagerOrAssignedTechnicianMixin
 from .forms import ServiceRecordDescriptionForm, VehicleForm
 from .models import ServiceRecord, Vehicle
+from .services import ensure_due_record
 
 
 class VehicleListView(LoginRequiredMixin, ListView):
@@ -87,6 +88,15 @@ class VehicleUpdateView(FleetManagerRequiredMixin, VehicleFormMixin, UpdateView)
     """Scoped to the default manager (excludes archived) on purpose:
     editing specs on an archived vehicle isn't a use case this session's
     brief describes. Restore it first."""
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        # This is the one place a manager can change current_odometer, so
+        # it's one of the two places (the other is complete_service) that
+        # needs to re-derive due-ness -- the mileage threshold could have
+        # just been crossed by this edit.
+        ensure_due_record(self.object)
+        return response
 
 
 class VehicleArchiveView(FleetManagerRequiredMixin, View):

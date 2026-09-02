@@ -92,8 +92,12 @@ class ServiceRecord(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     completed_odometer = models.PositiveIntegerField(null=True, blank=True)
 
+    # null=True: ensure_due_record() (session 4) creates ServiceRecords with
+    # no human actor when a vehicle crosses a due threshold on its own --
+    # mirrors the actor=None ("system-generated") pattern TimelineEvent
+    # already uses below, rather than inventing a fake "system" user row.
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     technicians = models.ManyToManyField(
         settings.AUTH_USER_MODEL,

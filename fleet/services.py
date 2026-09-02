@@ -171,4 +171,82 @@ def complete_service(record, completed_odometer, actor):
         )
 
         _record_status_change(record, actor, old_status)
+
+        # Re-derive due-ness for the same vehicle inside this same
+        # transaction: if the freshly-computed thresholds are already met
+        # (a very short interval, or the vehicle was already past its old
+        # due point by the time this completion got logged), the next DUE
+        # record should exist the instant this one closes, not wait for a
+        # future odometer edit or the next check_due_vehicles run.
+        ensure_due_record(vehicle)
+    return record
+
+
+def ensure_due_record(vehicle):
+    """Create a new DUE ServiceRecord for `vehicle` if it has crossed
+    either due threshold and doesn't already have one open. Returns the
+    created record, or None.
+
+    Called from exactly two places: complete_service above, and
+    VehicleUpdateView after an odometer edit -- both are moments the
+    vehicle's due-ness could have just changed. Everything else (the
+    calendar alone crossing next_due_date with nobody touching the
+    vehicle) is covered by the check_due_vehicles management command
+    instead, since there's no third code path that runs on a timer.
+    """
+    if vehicle.is_archived:
+        return None
+
+    has_open_record = ServiceRecord.objects.filter(
+        vehicle=vehicle,
+        status__in=[
+            ServiceRecord.Status.DUE,
+            ServiceRecord.Status.BOOKED,
+            ServiceRecord.Status.IN_SERVICE,
+        ],
+    ).exists()
+    if has_open_record:
+        return None
+
+    if vehicle.next_due_date is None and vehicle.next_due_odometer is None:
+        # Never serviced -- no baseline to judge due-ness against yet.
+        # Treated as not-yet-due rather than immediately-due, so a
+        # brand-new vehicle isn't flagged on day one. Flagged to the brief
+        # author as a judgment call; see docs/decisions.md.
+        return None
+
+    today = timezone.localdate()
+    date_triggered = vehicle.next_due_date is not None and vehicle.next_due_date <= today
+    odometer_triggered = (
+        vehicle.next_due_odometer is not None
+        and vehicle.current_odometer >= vehicle.next_due_odometer
+    )
+    if not (date_triggered or odometer_triggered):
+        return None
+
+    # Whichever threshold fired first is named in the description so a
+    # manager looking at the record doesn't have to cross-reference the
+    # vehicle to see why it exists.
+    if date_triggered:
+        reason = f"scheduled service date ({vehicle.next_due_date.isoformat()}) has passed"
+    else:
+        reason = (
+            f"odometer ({vehicle.current_odometer} km) reached the "
+            f"{vehicle.next_due_odometer} km service point"
+        )
+
+    with transaction.atomic():
+        record = ServiceRecord.objects.create(
+            vehicle=vehicle,
+            description=f"Automatically flagged due -- {reason}.",
+            status=ServiceRecord.Status.DUE,
+            due_since=timezone.now(),
+            created_by=None,
+        )
+        TimelineEvent.objects.create(
+            service_record=record,
+            event_type=TimelineEvent.EventType.CREATED,
+            actor=None,
+            new_value=ServiceRecord.Status.DUE,
+        )
     return record
