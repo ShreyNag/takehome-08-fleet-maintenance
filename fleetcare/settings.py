@@ -123,7 +123,20 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STORAGES = {
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        # Not CompressedManifestStaticFilesStorage: its {% static %} URL
+        # resolution reads collectstatic's manifest AND opens the file
+        # under STATIC_ROOT to hash it, and `manage.py test` never runs
+        # collectstatic -- every test that renders base.html (now that it
+        # loads a stylesheet) would fail with "file could not be found"
+        # even with manifest_strict=False, since STATIC_ROOT is empty
+        # before collectstatic ever runs once. CompressedStaticFilesStorage
+        # still gzip/brotli-compresses files during collectstatic for
+        # production, it just resolves {% static %} URLs by string
+        # concatenation (STATIC_URL + path) instead of a disk/manifest
+        # lookup, so it works identically whether or not collectstatic has
+        # run. Trade-off: no cache-busting hashed filenames -- acceptable
+        # for a single hand-written stylesheet with no build step.
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
     },
 }
 

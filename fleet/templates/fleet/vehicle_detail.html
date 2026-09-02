@@ -11,7 +11,7 @@
   <p>Next due (odometer): {{ vehicle.next_due_odometer|default:"—" }}{% if vehicle.next_due_odometer %} km{% endif %}</p>
   <p>
     Service status:
-    <span{% if vehicle.service_status == "OVERDUE" %} class="overdue"{% endif %}>{{ vehicle.service_status }}</span>
+    <span{% if vehicle.service_status == "OVERDUE" %} class="overdue"{% endif %}><span class="badge badge-vstatus-{{ vehicle.service_status|slugify }}">{{ vehicle.service_status }}</span></span>
   </p>
   {% if open_service_record %}
     <p>
@@ -21,17 +21,17 @@
   {% endif %}
 
   {% if user.is_fleet_manager %}
-    <p>
+    <p class="actions">
       {% if vehicle.is_archived %}
         <form method="post" action="{% url 'vehicle-restore' vehicle.pk %}">
           {% csrf_token %}
-          <button type="submit" class="btn-link">Restore</button>
+          <button type="submit" class="btn-link btn-secondary">Restore</button>
         </form>
       {% else %}
         <a href="{% url 'vehicle-update' vehicle.pk %}">Edit</a>
         <form method="post" action="{% url 'vehicle-archive' vehicle.pk %}">
           {% csrf_token %}
-          <button type="submit" class="btn-link">Archive</button>
+          <button type="submit" class="btn-link btn-destructive">Archive</button>
         </form>
         <a href="{% url 'service-record-create' vehicle.pk %}">New service record</a>
       {% endif %}
@@ -39,6 +39,7 @@
   {% endif %}
 
   <h2>Service history</h2>
+  <div class="table-wrapper">
   <table>
     <thead>
       <tr><th>Date</th><th>Status</th><th>Description</th></tr>
@@ -47,7 +48,7 @@
       {% for record in service_records %}
         <tr>
           <td><a href="{% url 'service-record-detail' record.pk %}">{{ record.created_at|date:"Y-m-d" }}</a></td>
-          <td>{{ record.get_status_display }}</td>
+          <td><span class="badge badge-rstatus-{{ record.status|lower }}">{{ record.get_status_display }}</span></td>
           <td>{{ record.description|truncatewords:12 }}</td>
         </tr>
       {% empty %}
@@ -55,4 +56,5 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 {% endblock %}

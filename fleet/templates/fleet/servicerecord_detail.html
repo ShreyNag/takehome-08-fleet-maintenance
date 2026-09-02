@@ -6,7 +6,7 @@
   <h1>Service record</h1>
   <p>Vehicle: <a href="{% url 'vehicle-detail' service_record.vehicle.pk %}">{{ service_record.vehicle }}</a></p>
   <p>
-    Status: {{ service_record.get_status_display }}
+    Status: <span class="badge badge-rstatus-{{ service_record.status|lower }}">{{ service_record.get_status_display }}</span>
     {% if service_record.is_overdue %}<strong class="overdue">(overdue)</strong>{% endif %}
   </p>
   <p>Description: {{ service_record.description }}</p>
@@ -19,17 +19,17 @@
     <p>Completed {{ service_record.completed_at|date:"Y-m-d H:i" }} at {{ service_record.completed_odometer }} km</p>
   {% endif %}
 
-  <p><a href="{% url 'service-record-update' service_record.pk %}">Edit description</a></p>
+  <p class="actions"><a href="{% url 'service-record-update' service_record.pk %}">Edit description</a></p>
 
   <h2>Technicians</h2>
-  <ul>
+  <ul class="technician-list">
     {% for technician in technicians %}
       <li>
         {{ technician }}
         {% if assign_technician_form %}
           <form method="post" action="{% url 'service-record-unassign' service_record.pk technician.pk %}">
             {% csrf_token %}
-            <button type="submit" class="btn-link">Remove</button>
+            <button type="submit" class="btn-link btn-destructive">Remove</button>
           </form>
         {% endif %}
       </li>
@@ -74,10 +74,10 @@
   <ul class="timeline">
     {% for event in timeline %}
       <li>
-        <strong>{{ event.get_event_type_display }}</strong>
-        {% if event.old_value or event.new_value %}({{ event.old_value }} &rarr; {{ event.new_value }}){% endif %}
-        &mdash; {{ event.actor|default:"System" }}, {{ event.created_at|date:"Y-m-d H:i" }}
-        {% if event.note %}<br><em>{{ event.note }}</em>{% endif %}
+        <span class="timeline-type"><strong>{{ event.get_event_type_display }}</strong>
+        {% if event.old_value or event.new_value %}<span class="timeline-transition">({{ event.old_value }} &rarr; {{ event.new_value }})</span>{% endif %}</span>
+        <span class="timeline-meta">&mdash; {{ event.actor|default:"System" }}, {{ event.created_at|date:"Y-m-d H:i" }}</span>
+        {% if event.note %}<br><span class="timeline-note"><em>{{ event.note }}</em></span>{% endif %}
       </li>
     {% empty %}
       <li>No timeline events yet.</li>

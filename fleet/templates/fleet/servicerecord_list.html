@@ -6,6 +6,7 @@
   <h1>Service records</h1>
 
   <form method="get">
+    <div class="filter-bar">
     <p>
       <label for="id_q">Search description</label>
       <input type="text" id="id_q" name="q" value="{{ request.GET.q }}">
@@ -41,14 +42,18 @@
         {% endfor %}
       </select>
     </p>
-    <button type="submit">Filter</button>
-    <a href="{% url 'service-record-list' %}">Clear filters</a>
+    </div>
+    <p class="form-actions">
+      <button type="submit">Filter</button>
+      <a href="{% url 'service-record-list' %}">Clear filters</a>
+    </p>
   </form>
 
-  <p><a href="{% url 'service-record-export' %}?{{ request.GET.urlencode }}">Export CSV</a></p>
+  <p class="actions"><a href="{% url 'service-record-export' %}?{{ request.GET.urlencode }}">Export CSV</a></p>
 
   <p>{{ paginator.count }} matching record{{ paginator.count|pluralize }}.</p>
 
+  <div class="table-wrapper">
   <table>
     <thead>
       <tr>
@@ -78,7 +83,7 @@
           <td><a href="{% url 'vehicle-detail' record.vehicle.pk %}">{{ record.vehicle }}</a></td>
           <td><a href="{% url 'service-record-detail' record.pk %}">{{ record.description|truncatechars:60 }}</a></td>
           <td>
-            {{ record.get_status_display }}
+            <span class="badge badge-rstatus-{{ record.status|lower }}">{{ record.get_status_display }}</span>
             {% if record.is_overdue %}<strong class="overdue">(overdue)</strong>{% endif %}
           </td>
           <td>{{ record.scheduled_date|default:"—" }}</td>
@@ -94,6 +99,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 
   {% if is_paginated %}
     <p>

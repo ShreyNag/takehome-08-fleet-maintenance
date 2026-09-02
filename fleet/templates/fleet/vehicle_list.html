@@ -6,12 +6,13 @@
   <h1>Vehicles</h1>
 
   {% if user.is_fleet_manager %}
-    <p>
+    <p class="actions">
       <a href="{% url 'vehicle-create' %}">New vehicle</a>
       &middot; <a href="{% url 'vehicle-archived-list' %}">Archived vehicles</a>
     </p>
   {% endif %}
 
+  <div class="table-wrapper">
   <table>
     <thead>
       <tr>
@@ -34,13 +35,13 @@
           <td>{{ vehicle.service_interval_days }} days / {{ vehicle.service_interval_km }} km</td>
           <td>{{ vehicle.next_due_date|default:"—" }}</td>
           <td>{{ vehicle.next_due_odometer|default:"—" }} {% if vehicle.next_due_odometer %}km{% endif %}</td>
-          <td{% if vehicle.service_status == "OVERDUE" %} class="overdue"{% endif %}>{{ vehicle.service_status }}</td>
+          <td{% if vehicle.service_status == "OVERDUE" %} class="overdue"{% endif %}><span class="badge badge-vstatus-{{ vehicle.service_status|slugify }}">{{ vehicle.service_status }}</span></td>
           {% if user.is_fleet_manager %}
             <td>
               <a href="{% url 'vehicle-update' vehicle.pk %}">Edit</a>
               <form method="post" action="{% url 'vehicle-archive' vehicle.pk %}">
                 {% csrf_token %}
-                <button type="submit" class="btn-link">Archive</button>
+                <button type="submit" class="btn-link btn-destructive">Archive</button>
               </form>
             </td>
           {% endif %}
@@ -50,4 +51,5 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 {% endblock %}

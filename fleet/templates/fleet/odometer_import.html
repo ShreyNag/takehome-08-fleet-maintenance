@@ -20,6 +20,7 @@
     </p>
 
     {% if report.rejected_rows %}
+      <div class="table-wrapper">
       <table>
         <thead>
           <tr>
@@ -38,6 +39,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
   {% endif %}
 {% endblock %}

@@ -4,8 +4,9 @@
 
 {% block content %}
   <h1>Archived vehicles</h1>
-  <p><a href="{% url 'vehicle-list' %}">Back to vehicles</a></p>
+  <p class="actions"><a href="{% url 'vehicle-list' %}">Back to vehicles</a></p>
 
+  <div class="table-wrapper">
   <table>
     <thead>
       <tr>
@@ -22,7 +23,7 @@
           <td>
             <form method="post" action="{% url 'vehicle-restore' vehicle.pk %}">
               {% csrf_token %}
-              <button type="submit" class="btn-link">Restore</button>
+              <button type="submit" class="btn-link btn-secondary">Restore</button>
             </form>
           </td>
         </tr>
@@ -31,4 +32,5 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 {% endblock %}
