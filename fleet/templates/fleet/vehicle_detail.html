@@ -8,8 +8,21 @@
   <p>Odometer: {{ vehicle.current_odometer }} km</p>
   <p>Service interval: every {{ vehicle.service_interval_days }} days or {{ vehicle.service_interval_km }} km</p>
 
-  {% if user.is_fleet_manager and not vehicle.is_archived %}
-    <p><a href="{% url 'vehicle-update' vehicle.pk %}">Edit</a></p>
+  {% if user.is_fleet_manager %}
+    <p>
+      {% if vehicle.is_archived %}
+        <form method="post" action="{% url 'vehicle-restore' vehicle.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn-link">Restore</button>
+        </form>
+      {% else %}
+        <a href="{% url 'vehicle-update' vehicle.pk %}">Edit</a>
+        <form method="post" action="{% url 'vehicle-archive' vehicle.pk %}">
+          {% csrf_token %}
+          <button type="submit" class="btn-link">Archive</button>
+        </form>
+      {% endif %}
+    </p>
   {% endif %}
 
   <h2>Service history</h2>

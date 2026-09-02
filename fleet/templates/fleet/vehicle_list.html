@@ -6,7 +6,10 @@
   <h1>Vehicles</h1>
 
   {% if user.is_fleet_manager %}
-    <p><a href="{% url 'vehicle-create' %}">New vehicle</a></p>
+    <p>
+      <a href="{% url 'vehicle-create' %}">New vehicle</a>
+      &middot; <a href="{% url 'vehicle-archived-list' %}">Archived vehicles</a>
+    </p>
   {% endif %}
 
   <table>
@@ -27,7 +30,13 @@
           <td>{{ vehicle.current_odometer }} km</td>
           <td>{{ vehicle.service_interval_days }} days / {{ vehicle.service_interval_km }} km</td>
           {% if user.is_fleet_manager %}
-            <td><a href="{% url 'vehicle-update' vehicle.pk %}">Edit</a></td>
+            <td>
+              <a href="{% url 'vehicle-update' vehicle.pk %}">Edit</a>
+              <form method="post" action="{% url 'vehicle-archive' vehicle.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="btn-link">Archive</button>
+              </form>
+            </td>
           {% endif %}
         </tr>
       {% empty %}

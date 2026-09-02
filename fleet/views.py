@@ -1,6 +1,8 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from accounts.mixins import FleetManagerRequiredMixin
@@ -84,3 +86,49 @@ class VehicleUpdateView(FleetManagerRequiredMixin, VehicleFormMixin, UpdateView)
     """Scoped to the default manager (excludes archived) on purpose:
     editing specs on an archived vehicle isn't a use case this session's
     brief describes. Restore it first."""
+
+
+class VehicleArchiveView(FleetManagerRequiredMixin, View):
+    """POST-only: this changes state, so a GET would be CSRF-exposed and
+    crawlable (a link-prefetcher or a stray GET could archive a vehicle).
+    Matches how logout is already done in base.html -- a small POST form
+    with a button, not a link.
+
+    Looked up via all_objects, not the default manager: an already-
+    archived vehicle isn't findable through Vehicle.objects, and archiving
+    it again should still be a well-defined no-op rather than a 404.
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        vehicle = get_object_or_404(Vehicle.all_objects, pk=pk)
+        vehicle.is_archived = True
+        vehicle.save(update_fields=["is_archived", "updated_at"])
+        messages.success(request, f"{vehicle.registration_number} archived.")
+        return redirect("vehicle-list")
+
+
+class VehicleRestoreView(FleetManagerRequiredMixin, View):
+    """See VehicleArchiveView -- same POST-only, same all_objects lookup,
+    opposite direction."""
+
+    http_method_names = ["post"]
+
+    def post(self, request, pk):
+        vehicle = get_object_or_404(Vehicle.all_objects, pk=pk)
+        vehicle.is_archived = False
+        vehicle.save(update_fields=["is_archived", "updated_at"])
+        messages.success(request, f"{vehicle.registration_number} restored.")
+        return redirect("vehicle-archived-list")
+
+
+class ArchivedVehicleListView(FleetManagerRequiredMixin, ListView):
+    """Manager-only: this is where archived vehicles actually live once
+    they're off the default list."""
+
+    template_name = "fleet/vehicle_archived_list.html"
+    context_object_name = "vehicles"
+
+    def get_queryset(self):
+        return Vehicle.all_objects.filter(is_archived=True)
