@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}{{ vehicle.registration_number }} — FleetCare{% endblock %}
+
+{% block content %}
+  <h1>{{ vehicle.registration_number }}{% if vehicle.is_archived %} (archived){% endif %}</h1>
+  <p>{{ vehicle.make }} {{ vehicle.model }}</p>
+  <p>Odometer: {{ vehicle.current_odometer }} km</p>
+  <p>Service interval: every {{ vehicle.service_interval_days }} days or {{ vehicle.service_interval_km }} km</p>
+
+  <h2>Service history</h2>
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Status</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      {% for record in service_records %}
+        <tr>
+          <td>{{ record.created_at|date:"Y-m-d" }}</td>
+          <td>{{ record.get_status_display }}</td>
+          <td>{{ record.description|truncatewords:12 }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="3">No service records yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}
