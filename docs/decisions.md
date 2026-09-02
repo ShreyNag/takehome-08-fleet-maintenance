@@ -208,6 +208,13 @@ evidence of an unchanged database. From session 3 onward I verify by querying
 Neon or opening the admin, and I develop against a local SQLite server rather
 than round-tripping through Render.
 
+**Third instance, session 4:** an empty `manage.py shell` query read as broken
+lifecycle logic, when the shell was on local SQLite and the data was in Neon.
+The pattern is consistent enough now to be a working practice rather than three
+mishaps: before concluding anything is broken, confirm which surface is being
+read. Sessions 5 and 6 are developed entirely locally so the browser, the
+shell and the tests all agree.
+
 ## 13. Keeping derived and lifecycle fields off every form
 
 **Session 3.**
@@ -297,3 +304,99 @@ The visible cost is that the app is plain. The accepted risk is that the
 dashboard in goal 8 needs a chart, which will require one small JavaScript
 dependency — that will be a deliberate, single exception rather than a
 framework adopted up front.
+
+## 18. Scoping vehicles to technicians — reversing #15
+
+**Session 4.**
+
+**Originally chose (#15):** Both roles see the whole fleet. Goal 1 restricts
+what technicians can *do*, not what they can see, so gating the vehicle list
+looked like inventing a rule the brief hadn't asked for.
+
+**Reversed to:** Technicians see only vehicles they hold at least one service
+assignment against, in any status. Managers see everything.
+
+Re-reading goal 1: technicians "can only see and update service records
+assigned to them." The word is *see*, and the vehicle is the context around
+the record rather than something separate from it. Showing a technician the
+full fleet is a wider reading than the brief supports.
+
+Scoped on *any* assignment ever, not open ones. A technician who serviced a
+van last month should still be able to look it up — narrowing to open records
+would make their own completed work disappear.
+
+An unauthorised vehicle returns 403, not 404. This needed an object-level
+check separate from the queryset filter: filtering the queryset alone means
+`get_object()` raises `Http404`, which conflates "not permitted" with "does
+not exist" and makes the test weaker.
+
+**Cost:** technicians land on a near-empty vehicle list until goal 5's
+cross-vehicle record list gives them a proper home screen. Acceptable, because
+that list is the view they should be starting from anyway.
+
+## 19. Sibling mixins rather than one mixin with a branch
+
+**Session 4.**
+
+**Chose:** `VehicleTechnicianScopedQuerysetMixin` alongside the existing
+`TechnicianScopedQuerysetMixin`, and a matching pair for the object-level
+checks.
+**Rejected:** Extending the existing mixins with a branch on model type.
+
+The two filters look similar and aren't. Scoping service records is
+`.filter(technicians=user)` — one direct M2M hop on the queryset's own model.
+Scoping vehicles is `.filter(service_records__technicians=user)` — a
+reverse-FK then an M2M, which duplicates a vehicle once per matching record
+and therefore needs `.distinct()`. The record version never has that problem.
+
+Folding "how many hops, and do I need distinct" into one class produces a
+branch wearing the costume of an abstraction: shared name, shared file,
+nothing actually shared. Two small explicit mixins are longer and easier to
+read.
+
+This was proposed by the coding tool in response to a prompt that asked for
+one mixin "if it fits, or a sibling if forcing them together makes both
+worse." I asked for the reasoning before implementation and accepted it on the
+`.distinct()` argument.
+
+## 20. Service status as a SQL annotation, not a model property
+
+**Session 4.**
+
+**Chose:** `VehicleQuerySet.with_service_status()`, annotating two correlated
+`Exists()` subqueries into a four-way `Case`/`When` label.
+**Rejected:** A Python property on `Vehicle` computing the label per instance.
+
+A property is simpler and produces an N+1 — one query per vehicle on the fleet
+list, and the same again on the dashboard. Worse, it can't be filtered,
+sorted or counted, which goals 6 and 8 both require. This is the same argument
+as decision #7: due-ness has to exist in SQL, not only in Python.
+
+`Exists()` subqueries rather than joins, so the query count stays flat
+regardless of fleet size, and the annotation can't interact badly with the
+`.distinct()` from technician scoping — it's computed per vehicle pk, not per
+joined row. Asserted with `assertNumQueries` at two different fleet sizes.
+
+The overdue subquery is built from the existing `ServiceRecord.objects
+.overdue()` with a vehicle filter added, not a reimplementation. The grace
+period comparison already existed as a queryset filter and a model property; a
+third copy is how those quietly diverge.
+
+Case ordering matters: OVERDUE is tested before DUE, since an overdue record
+is also an open one and `Case` returns on first match.
+
+## 21. "Not yet serviced" as a distinct state
+
+**Session 4.**
+
+**Chose:** Four labels — OVERDUE, DUE, NOT YET SERVICED, OK.
+**Rejected:** Three, folding never-serviced vehicles into OK.
+
+A vehicle with null next-due values has never been serviced, so nothing is
+watching it. Labelling that OK would be actively misleading — it reads as
+"nothing needed" when it means "no baseline exists yet."
+
+This surfaces the consequence of the session 4 call that a brand-new vehicle
+is not immediately due. That decision is defensible, but it means every new
+vehicle needs one manually created service record before automatic tracking
+begins, and the fleet list now makes that visible rather than silent.
