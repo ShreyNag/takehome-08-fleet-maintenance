@@ -9,7 +9,9 @@ happens inside an explicit transaction.atomic() block, in this one file, so
 there is exactly one place the rules live.
 """
 
-from .models import ServiceRecord
+from django.db import transaction
+
+from .models import ServiceAssignment, ServiceRecord, TimelineEvent
 
 # Explicit per-state allow-list rather than a generic "what's the next
 # status" check. COMPLETED maps to an empty set, which is what makes it
@@ -71,3 +73,49 @@ class InvalidTransitionInput(ServiceLifecycleError):
 def _check_transition(record, target):
     if target not in ALLOWED_TRANSITIONS.get(record.status, set()):
         raise InvalidTransition(record, target)
+
+
+def _record_status_change(record, actor, old_status):
+    TimelineEvent.objects.create(
+        service_record=record,
+        event_type=TimelineEvent.EventType.STATUS_CHANGED,
+        actor=actor,
+        old_value=old_status,
+        new_value=record.status,
+    )
+
+
+# Every transition function below follows the same shape: validate
+# everything (legality of the move, then required arguments) BEFORE
+# mutating anything. That ordering isn't just tidy -- it's what guarantees
+# ServiceLifecycleError is only ever raised pre-mutation, so a caller that
+# catches it (the view layer) never has to worry about the record object
+# being left half-updated in memory even though the DB write rolled back.
+
+
+def book_service(record, scheduled_date, technician, actor):
+    """DUE -> BOOKED.
+
+    Goal 4: "booking assigns a scheduled date and a technician" -- both are
+    hard preconditions, not optional metadata filled in later, so a missing
+    one rejects the whole transition rather than booking with a gap.
+    """
+    _check_transition(record, ServiceRecord.Status.BOOKED)
+    if not scheduled_date or not technician:
+        raise InvalidTransitionInput(
+            "Booking requires both a scheduled date and a technician."
+        )
+    with transaction.atomic():
+        old_status = record.status
+        record.status = ServiceRecord.Status.BOOKED
+        record.scheduled_date = scheduled_date
+        record.save(update_fields=["status", "scheduled_date", "updated_at"])
+        # The through-model row IS the assignment; no separate
+        # TECHNICIAN_ASSIGNED timeline event -- goal 4's tests require
+        # exactly one timeline event per transition call, and the
+        # ServiceAssignment row already records who and when.
+        ServiceAssignment.objects.create(
+            service_record=record, technician=technician, assigned_by=actor
+        )
+        _record_status_change(record, actor, old_status)
+    return record
