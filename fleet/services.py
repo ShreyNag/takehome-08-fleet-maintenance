@@ -119,3 +119,14 @@ def book_service(record, scheduled_date, technician, actor):
         )
         _record_status_change(record, actor, old_status)
     return record
+
+
+def start_service(record, actor):
+    """BOOKED -> IN_SERVICE. No extra data required for this one."""
+    _check_transition(record, ServiceRecord.Status.IN_SERVICE)
+    with transaction.atomic():
+        old_status = record.status
+        record.status = ServiceRecord.Status.IN_SERVICE
+        record.save(update_fields=["status", "updated_at"])
+        _record_status_change(record, actor, old_status)
+    return record
