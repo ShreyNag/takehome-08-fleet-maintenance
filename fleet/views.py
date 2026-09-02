@@ -39,11 +39,23 @@ class VehicleListView(VehicleTechnicianScopedQuerysetMixin, LoginRequiredMixin, 
     archive controls are hidden in the template for non-managers, but
     that's cosmetic; the views those links point to enforce it
     server-side on their own.
+
+    with_service_status() is annotated here, not computed per-row in the
+    template: it runs as Exists() subqueries in the one query this view
+    already makes, so it doesn't scale with vehicle count.
     """
 
     model = Vehicle
     template_name = "fleet/vehicle_list.html"
     context_object_name = "vehicles"
+
+    def get_queryset(self):
+        # super().get_queryset() is VehicleTechnicianScopedQuerysetMixin's:
+        # ListView's default (Vehicle.objects.all(), archived excluded),
+        # technician-filtered on top if applicable. with_service_status()
+        # chains onto whatever that returns -- the annotation doesn't care
+        # how many rows survived the scoping filter above it.
+        return super().get_queryset().with_service_status()
 
 
 class VehicleDetailView(VehicleManagerOrAssignedTechnicianMixin, DetailView):
@@ -65,7 +77,7 @@ class VehicleDetailView(VehicleManagerOrAssignedTechnicianMixin, DetailView):
     context_object_name = "vehicle"
 
     def get_queryset(self):
-        return Vehicle.all_objects.all()
+        return Vehicle.all_objects.with_service_status()
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -79,6 +91,23 @@ class VehicleDetailView(VehicleManagerOrAssignedTechnicianMixin, DetailView):
         # ServiceRecord.vehicle means they can't be deleted out from under
         # it either.
         context["service_records"] = self.object.service_records.order_by("-created_at")
+        # "The" open record -- ensure_due_record and the transition state
+        # machine both assume at most one open record per vehicle, but
+        # nothing at the DB level enforces that (a manager could create a
+        # second one by hand while one is already open), so this picks the
+        # most recently due one if more than one somehow exists rather
+        # than asserting there's exactly one.
+        context["open_service_record"] = (
+            self.object.service_records.filter(
+                status__in=[
+                    ServiceRecord.Status.DUE,
+                    ServiceRecord.Status.BOOKED,
+                    ServiceRecord.Status.IN_SERVICE,
+                ]
+            )
+            .order_by("-due_since")
+            .first()
+        )
         return context
 
 

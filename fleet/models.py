@@ -14,8 +14,54 @@ class TimelineImmutableError(Exception):
     """
 
 
-class VehicleManager(models.Manager):
-    """Excludes archived vehicles. Declared first, see Vehicle docstring."""
+class VehicleQuerySet(models.QuerySet):
+    def with_service_status(self):
+        """Annotate `service_status` (one of Vehicle.ServiceStatus) on
+        every row via two correlated Exists() subqueries -- not a join, so
+        this stays one query regardless of how many vehicles or service
+        records exist, and doesn't reimplement the grace-period comparison:
+        the OVERDUE check is ServiceRecord.objects.overdue() (session 4)
+        with a vehicle filter added on top, not a second copy of the
+        due_since + grace_period < now formula.
+        """
+        overdue_exists = ServiceRecord.objects.overdue().filter(vehicle=models.OuterRef("pk"))
+        open_exists = ServiceRecord.objects.filter(
+            vehicle=models.OuterRef("pk"),
+            status__in=[
+                ServiceRecord.Status.DUE,
+                ServiceRecord.Status.BOOKED,
+                ServiceRecord.Status.IN_SERVICE,
+            ],
+        )
+        return self.annotate(
+            _has_overdue_record=models.Exists(overdue_exists),
+            _has_open_record=models.Exists(open_exists),
+        ).annotate(
+            # .label, not the bare enum member: NOT_YET_SERVICED's value
+            # ("NOT_YET_SERVICED") and label ("NOT YET SERVICED") differ,
+            # and .label is the one that's the exact display text.
+            service_status=models.Case(
+                models.When(_has_overdue_record=True, then=models.Value(Vehicle.ServiceStatus.OVERDUE.label)),
+                models.When(_has_open_record=True, then=models.Value(Vehicle.ServiceStatus.DUE.label)),
+                models.When(
+                    next_due_date__isnull=True,
+                    next_due_odometer__isnull=True,
+                    then=models.Value(Vehicle.ServiceStatus.NOT_YET_SERVICED.label),
+                ),
+                default=models.Value(Vehicle.ServiceStatus.OK.label),
+                output_field=models.CharField(),
+            )
+        )
+
+
+class VehicleManager(models.Manager.from_queryset(VehicleQuerySet)):
+    """Excludes archived vehicles. Declared first, see Vehicle docstring.
+
+    Built from VehicleQuerySet (rather than a plain models.Manager) so
+    with_service_status() is available as Vehicle.objects.with_service_
+    status() too, chaining on top of the archived-exclusion below rather
+    than needing a separate manager for it.
+    """
 
     def get_queryset(self):
         return super().get_queryset().filter(is_archived=False)
@@ -33,6 +79,15 @@ class Vehicle(models.Model):
     (session 4) may write these two fields — nothing else should ever set
     them directly.
     """
+
+    class ServiceStatus(models.TextChoices):
+        # .label is the exact display text the brief spells out in caps --
+        # with_service_status() below annotates .label values, not .value,
+        # since they differ for NOT_YET_SERVICED (underscore vs space).
+        OVERDUE = "OVERDUE", "OVERDUE"
+        DUE = "DUE", "DUE"
+        NOT_YET_SERVICED = "NOT_YET_SERVICED", "NOT YET SERVICED"
+        OK = "OK", "OK"
 
     registration_number = models.CharField(max_length=32, unique=True)
     # unique=True already creates a unique index in Postgres; no separate
@@ -63,7 +118,11 @@ class Vehicle(models.Model):
     # cost: admin (or anything else) that needs archived vehicles has to
     # opt in explicitly via `all_objects` — see VehicleAdmin.get_queryset.
     objects = VehicleManager()
-    all_objects = models.Manager()
+    # VehicleQuerySet.as_manager(), not a plain models.Manager(): all_objects
+    # needs with_service_status() too (VehicleDetailView uses it, since an
+    # archived vehicle must still render its status), just without the
+    # archived-exclusion VehicleManager adds on top.
+    all_objects = VehicleQuerySet.as_manager()
 
     class Meta:
         ordering = ["registration_number"]

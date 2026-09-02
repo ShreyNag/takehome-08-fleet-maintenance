@@ -7,6 +7,18 @@
   <p>{{ vehicle.make }} {{ vehicle.model }}</p>
   <p>Odometer: {{ vehicle.current_odometer }} km</p>
   <p>Service interval: every {{ vehicle.service_interval_days }} days or {{ vehicle.service_interval_km }} km</p>
+  <p>Next due (date): {{ vehicle.next_due_date|default:"—" }}</p>
+  <p>Next due (odometer): {{ vehicle.next_due_odometer|default:"—" }}{% if vehicle.next_due_odometer %} km{% endif %}</p>
+  <p>
+    Service status:
+    <span{% if vehicle.service_status == "OVERDUE" %} class="overdue"{% endif %}>{{ vehicle.service_status }}</span>
+  </p>
+  {% if open_service_record %}
+    <p>
+      Open service record:
+      <a href="{% url 'service-record-detail' open_service_record.pk %}">{{ open_service_record.get_status_display }} — {{ open_service_record.description|truncatewords:8 }}</a>
+    </p>
+  {% endif %}
 
   {% if user.is_fleet_manager %}
     <p>

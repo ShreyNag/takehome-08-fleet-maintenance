@@ -754,3 +754,90 @@ class VehicleTechnicianScopingTests(TestCase):
         self.client.force_login(self.technician)
         response = self.client.get(reverse("vehicle-archived-list"))
         self.assertEqual(response.status_code, 403)
+
+
+class VehicleServiceStatusAnnotationTests(TestCase):
+    """The four service_status states, and that the queryset stays a
+    single query regardless of vehicle count (no N+1 from the
+    annotation)."""
+
+    def setUp(self):
+        self.manager = make_user("vstatus-mgr@example.com", User.Role.FLEET_MANAGER)
+
+    def test_not_yet_serviced_when_both_next_due_fields_are_null(self):
+        vehicle = make_vehicle(registration_number="VSTATUS-NEW")
+        status = Vehicle.objects.with_service_status().get(pk=vehicle.pk).service_status
+        self.assertEqual(status, Vehicle.ServiceStatus.NOT_YET_SERVICED.label)
+
+    def test_ok_when_no_open_record_and_next_due_is_in_the_future(self):
+        vehicle = make_vehicle(
+            registration_number="VSTATUS-OK",
+            next_due_date=timezone.localdate() + timedelta(days=30),
+            next_due_odometer=99_999,
+        )
+        status = Vehicle.objects.with_service_status().get(pk=vehicle.pk).service_status
+        self.assertEqual(status, Vehicle.ServiceStatus.OK.label)
+
+    def test_due_when_an_open_non_overdue_record_exists(self):
+        vehicle = make_vehicle(
+            registration_number="VSTATUS-DUE",
+            next_due_date=timezone.localdate(),
+            next_due_odometer=99_999,
+        )
+        make_record(vehicle, self.manager, status=ServiceRecord.Status.DUE, due_since=timezone.now())
+        status = Vehicle.objects.with_service_status().get(pk=vehicle.pk).service_status
+        self.assertEqual(status, Vehicle.ServiceStatus.DUE.label)
+
+    def test_overdue_when_the_open_due_record_is_past_grace(self):
+        vehicle = make_vehicle(
+            registration_number="VSTATUS-OVERDUE",
+            next_due_date=timezone.localdate() - timedelta(days=30),
+            next_due_odometer=99_999,
+        )
+        old_due_since = timezone.now() - timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS + 1)
+        make_record(vehicle, self.manager, status=ServiceRecord.Status.DUE, due_since=old_due_since)
+        status = Vehicle.objects.with_service_status().get(pk=vehicle.pk).service_status
+        self.assertEqual(status, Vehicle.ServiceStatus.OVERDUE.label)
+
+    def test_overdue_takes_priority_over_a_second_open_record(self):
+        # Not a case the app is expected to create on its own (ensure_due_
+        # record refuses to duplicate an open record), but the annotation
+        # itself shouldn't silently pick the wrong one if it ever happens.
+        vehicle = make_vehicle(
+            registration_number="VSTATUS-MIXED",
+            next_due_date=timezone.localdate() - timedelta(days=30),
+            next_due_odometer=99_999,
+        )
+        old_due_since = timezone.now() - timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS + 1)
+        make_record(vehicle, self.manager, status=ServiceRecord.Status.DUE, due_since=old_due_since)
+        make_record(vehicle, self.manager, status=ServiceRecord.Status.BOOKED, scheduled_date=date.today())
+        status = Vehicle.objects.with_service_status().get(pk=vehicle.pk).service_status
+        self.assertEqual(status, Vehicle.ServiceStatus.OVERDUE.label)
+
+    def test_completed_only_history_does_not_count_as_open(self):
+        vehicle = make_vehicle(
+            registration_number="VSTATUS-COMPLETED",
+            next_due_date=timezone.localdate() + timedelta(days=30),
+            next_due_odometer=99_999,
+        )
+        make_record(
+            vehicle,
+            self.manager,
+            status=ServiceRecord.Status.COMPLETED,
+            completed_at=timezone.now(),
+            completed_odometer=vehicle.current_odometer,
+        )
+        status = Vehicle.objects.with_service_status().get(pk=vehicle.pk).service_status
+        self.assertEqual(status, Vehicle.ServiceStatus.OK.label)
+
+    def test_query_count_does_not_grow_with_vehicle_count(self):
+        for i in range(3):
+            make_vehicle(registration_number=f"VSTATUS-N-{i}")
+        self.client.force_login(self.manager)
+        with self.assertNumQueries(3):
+            self.client.get(reverse("vehicle-list"))
+
+        for i in range(7):
+            make_vehicle(registration_number=f"VSTATUS-N2-{i}")
+        with self.assertNumQueries(3):
+            self.client.get(reverse("vehicle-list"))

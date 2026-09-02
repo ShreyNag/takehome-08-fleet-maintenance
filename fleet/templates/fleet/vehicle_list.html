@@ -19,6 +19,9 @@
         <th>Make / model</th>
         <th>Odometer</th>
         <th>Service interval</th>
+        <th>Next due (date)</th>
+        <th>Next due (odometer)</th>
+        <th>Service status</th>
         {% if user.is_fleet_manager %}<th></th>{% endif %}
       </tr>
     </thead>
@@ -29,6 +32,9 @@
           <td>{{ vehicle.make }} {{ vehicle.model }}</td>
           <td>{{ vehicle.current_odometer }} km</td>
           <td>{{ vehicle.service_interval_days }} days / {{ vehicle.service_interval_km }} km</td>
+          <td>{{ vehicle.next_due_date|default:"—" }}</td>
+          <td>{{ vehicle.next_due_odometer|default:"—" }} {% if vehicle.next_due_odometer %}km{% endif %}</td>
+          <td{% if vehicle.service_status == "OVERDUE" %} class="overdue"{% endif %}>{{ vehicle.service_status }}</td>
           {% if user.is_fleet_manager %}
             <td>
               <a href="{% url 'vehicle-update' vehicle.pk %}">Edit</a>
@@ -40,7 +46,7 @@
           {% endif %}
         </tr>
       {% empty %}
-        <tr><td colspan="5">No vehicles yet.</td></tr>
+        <tr><td colspan="8">No vehicles yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
