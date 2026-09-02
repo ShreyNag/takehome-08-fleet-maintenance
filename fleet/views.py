@@ -14,6 +14,7 @@ from accounts.mixins import (
     VehicleTechnicianScopedQuerysetMixin,
 )
 from accounts.models import User
+from .filters import scoped_service_records
 from .forms import (
     AssignTechnicianForm,
     BookServiceForm,
@@ -444,6 +445,29 @@ class ServiceRecordAssignTechnicianView(FleetManagerRequiredMixin, SingleObjectM
         else:
             messages.info(request, f"{assignment.technician} is already assigned.")
         return redirect("service-record-detail", pk=self.object.pk)
+
+
+class ServiceRecordListView(LoginRequiredMixin, ListView):
+    """Every service record the viewer can see, across every vehicle --
+    and goal 5's technician landing page IS this view, not a separate one:
+    scoping comes from fleet.filters.scoped_service_records (same rule
+    TechnicianScopedQuerysetMixin encodes elsewhere), which restricts a
+    technician to their own records with no extra parameter needed, so
+    pointing the login redirect at this URL is sufficient on its own.
+
+    Scoping lives in fleet.filters rather than here so ServiceRecordExport
+    View (goal 7, not a ListView) can reuse the exact same rule. Search,
+    filters, sorting and pagination land in the next commit (goal 6) --
+    this is deliberately just the scoped list goal 5 needs as a landing
+    page.
+    """
+
+    model = ServiceRecord
+    template_name = "fleet/servicerecord_list.html"
+    context_object_name = "service_records"
+
+    def get_queryset(self):
+        return scoped_service_records(self.request.user).order_by("scheduled_date", "pk")
 
 
 class ServiceRecordUnassignTechnicianView(FleetManagerRequiredMixin, SingleObjectMixin, View):

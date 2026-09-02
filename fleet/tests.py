@@ -1022,3 +1022,60 @@ class TechnicianAssignedViaBookingVisibilityTests(TestCase):
         self.client.force_login(self.technician)
         response = self.client.get(reverse("vehicle-list"))
         self.assertIn(self.vehicle, response.context["vehicles"])
+
+
+class ServiceRecordListViewTests(TestCase):
+    """Goal 5's technician landing page: one scoped list across every
+    vehicle. Search/filter/sort/pagination land in the next commit (goal
+    6) on this same view -- this covers only the role-scoping this view
+    needs to work as a landing page."""
+
+    def setUp(self):
+        self.manager = make_user("list-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.tech_a = make_user("list-tech-a@example.com", User.Role.TECHNICIAN)
+        self.tech_b = make_user("list-tech-b@example.com", User.Role.TECHNICIAN)
+
+        self.vehicle_1 = make_vehicle(registration_number="LIST-1")
+        self.vehicle_2 = make_vehicle(registration_number="LIST-2")
+
+        self.record_1 = make_record(
+            self.vehicle_1, self.manager, status=ServiceRecord.Status.DUE, description="Replace brake pads"
+        )
+        ServiceAssignment.objects.create(service_record=self.record_1, technician=self.tech_a, assigned_by=self.manager)
+
+        self.record_2 = make_record(
+            self.vehicle_2,
+            self.manager,
+            status=ServiceRecord.Status.BOOKED,
+            description="Oil and filter change",
+            scheduled_date=date(2026, 3, 1),
+        )
+        ServiceAssignment.objects.create(service_record=self.record_2, technician=self.tech_b, assigned_by=self.manager)
+
+        self.record_3 = make_record(
+            self.vehicle_1,
+            self.manager,
+            status=ServiceRecord.Status.BOOKED,
+            description="Annual inspection",
+            scheduled_date=date(2026, 1, 15),
+        )
+        # No technician on record_3 -- neither tech_a nor tech_b should see it.
+
+    def _get(self, **params):
+        return self.client.get(reverse("service-record-list"), params)
+
+    def test_manager_sees_every_record(self):
+        self.client.force_login(self.manager)
+        response = self._get()
+        self.assertEqual(set(response.context["service_records"]), {self.record_1, self.record_2, self.record_3})
+
+    def test_technician_sees_only_their_own_records_across_vehicles(self):
+        self.client.force_login(self.tech_a)
+        response = self._get()
+        self.assertEqual(list(response.context["service_records"]), [self.record_1])
+
+    def test_technician_with_records_on_multiple_vehicles_sees_all_of_them(self):
+        ServiceAssignment.objects.create(service_record=self.record_2, technician=self.tech_a, assigned_by=self.manager)
+        self.client.force_login(self.tech_a)
+        response = self._get()
+        self.assertEqual(set(response.context["service_records"]), {self.record_1, self.record_2})
