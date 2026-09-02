@@ -14,11 +14,13 @@ from accounts.mixins import (
     VehicleTechnicianScopedQuerysetMixin,
 )
 from accounts.models import User
+from .csv_io import CsvImportError, import_odometer_readings
 from .filters import SORT_FIELDS, filtered_service_records
 from .forms import (
     AssignTechnicianForm,
     BookServiceForm,
     CompleteServiceForm,
+    OdometerImportForm,
     ServiceRecordDescriptionForm,
     TimelineNoteForm,
     VehicleForm,
@@ -198,6 +200,39 @@ class ArchivedVehicleListView(FleetManagerRequiredMixin, ListView):
 
     def get_queryset(self):
         return Vehicle.all_objects.filter(is_archived=True)
+
+
+class VehicleOdometerImportView(FleetManagerRequiredMixin, View):
+    """Goal 7: bulk odometer CSV upload. GET shows the upload form; POST
+    processes the file and re-renders the SAME page with a per-row report
+    -- no redirect on success, since the report is exactly what the
+    manager needs to see next, and a redirect would either have to stuff
+    the whole report into the session or throw it away.
+
+    A CsvImportError (wrong file type, empty file, over the row/byte cap)
+    is a FILE-level problem, not a row's -- shown as a single message with
+    a 400, no report table, since per-row processing never ran at all.
+    """
+
+    http_method_names = ["get", "post"]
+    template_name = "fleet/odometer_import.html"
+
+    def get(self, request):
+        return render(request, self.template_name, {"form": OdometerImportForm()})
+
+    def post(self, request):
+        form = OdometerImportForm(request.POST, request.FILES)
+        if not form.is_valid():
+            messages.error(request, "Choose a file to upload.")
+            return render(request, self.template_name, {"form": form}, status=400)
+
+        try:
+            report = import_odometer_readings(form.cleaned_data["file"], actor=request.user)
+        except CsvImportError as exc:
+            messages.error(request, str(exc))
+            return render(request, self.template_name, {"form": OdometerImportForm()}, status=400)
+
+        return render(request, self.template_name, {"form": OdometerImportForm(), "report": report})
 
 
 class ServiceRecordCreateView(FleetManagerRequiredMixin, CreateView):

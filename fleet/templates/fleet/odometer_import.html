@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Import odometer readings — FleetCare{% endblock %}
+
+{% block content %}
+  <h1>Import odometer readings</h1>
+  <p>Upload a CSV with two columns: registration number, odometer reading (km). A header row is optional.</p>
+
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Upload</button>
+  </form>
+
+  {% if report %}
+    <h2>Report</h2>
+    <p>
+      {{ report.total_rows }} row{{ report.total_rows|pluralize }} processed —
+      {{ report.succeeded }} succeeded, {{ report.rejected }} rejected.
+    </p>
+
+    {% if report.rejected_rows %}
+      <table>
+        <thead>
+          <tr>
+            <th>Line</th>
+            <th>Content</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in report.rejected_rows %}
+            <tr>
+              <td>{{ row.line_number }}</td>
+              <td>{{ row.raw }}</td>
+              <td>{{ row.reason }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  {% endif %}
+{% endblock %}

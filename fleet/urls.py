@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     path("vehicles/", views.VehicleListView.as_view(), name="vehicle-list"),
     path("vehicles/archived/", views.ArchivedVehicleListView.as_view(), name="vehicle-archived-list"),
+    path("vehicles/odometer-import/", views.VehicleOdometerImportView.as_view(), name="vehicle-odometer-import"),
     path("vehicles/create/", views.VehicleCreateView.as_view(), name="vehicle-create"),
     path("vehicles/<int:pk>/", views.VehicleDetailView.as_view(), name="vehicle-detail"),
     path("vehicles/<int:pk>/edit/", views.VehicleUpdateView.as_view(), name="vehicle-update"),

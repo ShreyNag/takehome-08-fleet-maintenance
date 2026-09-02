@@ -66,6 +66,16 @@ class AssignTechnicianForm(forms.Form):
     )
 
 
+class OdometerImportForm(forms.Form):
+    """Goal 7's bulk odometer upload. Just a file field -- every actual
+    validation (file type, size, row shape, per-row rejection reasons)
+    happens in fleet.csv_io.import_odometer_readings, not here, since
+    those rules produce a per-row report rather than a single form
+    error."""
+
+    file = forms.FileField(label="CSV file")
+
+
 class TimelineNoteForm(forms.Form):
     """NOTE_ADDED timeline events -- open to managers and the assigned
     technician, same permission as viewing the record at all."""

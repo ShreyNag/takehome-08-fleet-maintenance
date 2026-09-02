@@ -4,12 +4,14 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import User
+from fleet.csv_io import MAX_IMPORT_ROWS
 from fleet.forms import ServiceRecordDescriptionForm, VehicleForm
 from fleet.models import ServiceAssignment, ServiceRecord, TimelineEvent, TimelineImmutableError, Vehicle
 from fleet.services import (
@@ -1166,3 +1168,181 @@ class ServiceRecordListViewTests(TestCase):
 
         with self.assertNumQueries(7):
             self._get()
+
+
+def make_csv(content):
+    return SimpleUploadedFile("readings.csv", content.encode("utf-8"), content_type="text/csv")
+
+
+class CsvImportTests(TestCase):
+    """Goal 7's central requirement: every row judged independently, valid
+    rows applied even when other rows in the same file are rejected, and
+    every one of the six rejection reasons produces its own message."""
+
+    def setUp(self):
+        self.manager = make_user("csv-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.technician = make_user("csv-tech@example.com", User.Role.TECHNICIAN)
+        self.vehicle = make_vehicle(registration_number="CSV-1", current_odometer=10_000)
+        self.other_vehicle = make_vehicle(registration_number="CSV-2", current_odometer=5_000)
+        self.archived_vehicle = make_vehicle(
+            registration_number="CSV-ARCHIVED", current_odometer=1_000, is_archived=True
+        )
+
+    def _post(self, content):
+        self.client.force_login(self.manager)
+        return self.client.post(
+            reverse("vehicle-odometer-import"), {"file": make_csv(content)}
+        )
+
+    def test_technician_gets_403(self):
+        self.client.force_login(self.technician)
+        response = self.client.post(
+            reverse("vehicle-odometer-import"), {"file": make_csv("CSV-1,12000\n")}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_valid_row_updates_the_vehicle(self):
+        self._post("CSV-1,12000\n")
+        self.vehicle.refresh_from_db()
+        self.assertEqual(self.vehicle.current_odometer, 12_000)
+
+    def test_mixed_valid_and_invalid_applies_valid_rows_and_reports_each_rejection(self):
+        response = self._post(
+            "CSV-1,12000\n"
+            "NOT-A-VEHICLE,5000\n"
+            "CSV-2,-10\n"
+        )
+        report = response.context["report"]
+        self.assertEqual(report.total_rows, 3)
+        self.assertEqual(report.succeeded, 1)
+        self.assertEqual(report.rejected, 2)
+
+        self.vehicle.refresh_from_db()
+        self.other_vehicle.refresh_from_db()
+        self.assertEqual(self.vehicle.current_odometer, 12_000)
+        self.assertEqual(self.other_vehicle.current_odometer, 5_000)  # unchanged -- its row was rejected
+
+    def test_malformed_row_rejected(self):
+        response = self._post("CSV-1\n")  # missing the reading column
+        report = response.context["report"]
+        self.assertEqual(report.rejected, 1)
+        self.assertIn("Malformed", report.rejected_rows[0].reason)
+
+    def test_non_integer_reading_rejected(self):
+        response = self._post("CSV-1,not-a-number\n")
+        report = response.context["report"]
+        self.assertEqual(report.rejected, 1)
+        self.assertIn("valid whole number", report.rejected_rows[0].reason)
+
+    def test_single_bad_row_is_not_mistaken_for_a_header(self):
+        # A lone data row with an unparseable reading looks -- by the
+        # naive "does column 2 parse as an int" signal -- exactly like a
+        # header. It must still be reported as a rejected row, not
+        # silently swallowed as a header with zero data rows.
+        response = self._post("CSV-1,not-a-number\n")
+        report = response.context["report"]
+        self.assertEqual(report.total_rows, 1)
+        self.assertEqual(report.rejected, 1)
+
+    def test_negative_reading_rejected(self):
+        response = self._post("CSV-1,-500\n")
+        report = response.context["report"]
+        self.assertEqual(report.rejected, 1)
+        self.assertIn("negative", report.rejected_rows[0].reason.lower())
+
+    def test_duplicate_registration_first_occurrence_wins(self):
+        response = self._post("CSV-1,11000\nCSV-1,13000\n")
+        report = response.context["report"]
+        self.assertEqual(report.succeeded, 1)
+        self.assertEqual(report.rejected, 1)
+        self.assertIn("Duplicate", report.rejected_rows[0].reason)
+        self.vehicle.refresh_from_db()
+        self.assertEqual(self.vehicle.current_odometer, 11_000)  # the first row won, not the second
+
+    def test_registration_not_found_rejected(self):
+        response = self._post("NO-SUCH-REG,5000\n")
+        report = response.context["report"]
+        self.assertEqual(report.rejected, 1)
+        self.assertIn("not found", report.rejected_rows[0].reason.lower())
+
+    def test_archived_vehicle_rejected_distinctly_from_not_found(self):
+        response = self._post("CSV-ARCHIVED,2000\n")
+        report = response.context["report"]
+        self.assertEqual(report.rejected, 1)
+        self.assertIn("archived", report.rejected_rows[0].reason.lower())
+        self.archived_vehicle.refresh_from_db()
+        self.assertEqual(self.archived_vehicle.current_odometer, 1_000)
+
+    def test_reading_lower_than_current_rejected(self):
+        response = self._post("CSV-1,9000\n")
+        report = response.context["report"]
+        self.assertEqual(report.rejected, 1)
+        self.assertIn("lower", report.rejected_rows[0].reason.lower())
+
+    def test_rejected_row_leaves_the_vehicle_completely_unchanged(self):
+        before = (self.vehicle.current_odometer, self.vehicle.next_due_date, self.vehicle.next_due_odometer)
+        self._post("CSV-1,9000\n")  # rejected: lower than current
+        self.vehicle.refresh_from_db()
+        after = (self.vehicle.current_odometer, self.vehicle.next_due_date, self.vehicle.next_due_odometer)
+        self.assertEqual(before, after)
+
+    def test_successful_row_crossing_mileage_threshold_creates_a_due_record(self):
+        self.vehicle.next_due_odometer = 12_000
+        self.vehicle.next_due_date = date.today() + timedelta(days=365)
+        self.vehicle.save(update_fields=["next_due_odometer", "next_due_date"])
+
+        self._post("CSV-1,15000\n")
+
+        self.assertTrue(
+            ServiceRecord.objects.filter(vehicle=self.vehicle, status=ServiceRecord.Status.DUE).exists()
+        )
+
+    def test_header_row_is_skipped_when_present(self):
+        response = self._post("registration_number,odometer\nCSV-1,12000\n")
+        report = response.context["report"]
+        self.assertEqual(report.total_rows, 1)
+        self.assertEqual(report.succeeded, 1)
+
+    def test_works_without_a_header_row(self):
+        response = self._post("CSV-1,12000\n")
+        report = response.context["report"]
+        self.assertEqual(report.total_rows, 1)
+        self.assertEqual(report.succeeded, 1)
+
+    def test_extra_columns_are_ignored(self):
+        response = self._post("CSV-1,12000,serviced by Bob,note\n")
+        report = response.context["report"]
+        self.assertEqual(report.succeeded, 1)
+
+    def test_whitespace_and_blank_lines_are_tolerated(self):
+        response = self._post("  CSV-1 , 12000 \n\n\nCSV-2,6000\n")
+        report = response.context["report"]
+        self.assertEqual(report.succeeded, 2)
+
+    def test_crlf_line_endings_are_handled(self):
+        response = self._post("CSV-1,12000\r\nCSV-2,6000\r\n")
+        report = response.context["report"]
+        self.assertEqual(report.succeeded, 2)
+
+    def test_bom_on_first_cell_is_stripped(self):
+        content = "﻿CSV-1,12000\n"
+        response = self._post(content)
+        report = response.context["report"]
+        self.assertEqual(report.succeeded, 1)
+        self.vehicle.refresh_from_db()
+        self.assertEqual(self.vehicle.current_odometer, 12_000)
+
+    def test_non_csv_file_is_rejected_cleanly(self):
+        self.client.force_login(self.manager)
+        upload = SimpleUploadedFile("readings.txt", b"CSV-1,12000\n", content_type="text/plain")
+        response = self.client.post(reverse("vehicle-odometer-import"), {"file": upload})
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("report", response.context)
+
+    def test_row_cap_exceeded_is_rejected_before_touching_the_database(self):
+        content = "\n".join(f"CSV-1,{10_000 + i}" for i in range(MAX_IMPORT_ROWS + 1))
+        response = self._post(content)
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("report", response.context)
+        self.vehicle.refresh_from_db()
+        self.assertEqual(self.vehicle.current_odometer, 10_000)

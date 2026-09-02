@@ -38,6 +38,9 @@
       {% if user.is_authenticated %}
         <a href="{% url 'vehicle-list' %}">Vehicles</a>
         <a href="{% url 'service-record-list' %}">Service records</a>
+        {% if user.is_fleet_manager %}
+          <a href="{% url 'vehicle-odometer-import' %}">Import odometer readings</a>
+        {% endif %}
       {% endif %}
     </div>
     <div>
