@@ -673,3 +673,80 @@ class TransitionViewPermissionTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.record.refresh_from_db()
         self.assertEqual(self.record.status, ServiceRecord.Status.DUE)
+
+
+class VehicleTechnicianScopingTests(TestCase):
+    """A technician sees only vehicles they have at least one
+    ServiceAssignment against, any status, including completed -- and gets
+    403 (not 404, not an empty page) on a vehicle they have none on."""
+
+    def setUp(self):
+        self.manager = make_user("vscope-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.technician = make_user("vscope-tech@example.com", User.Role.TECHNICIAN)
+        self.other_technician = make_user("vscope-other@example.com", User.Role.TECHNICIAN)
+
+        self.assigned_vehicle = make_vehicle(registration_number="VSCOPE-ASSIGNED")
+        record = make_record(self.assigned_vehicle, self.manager, status=ServiceRecord.Status.DUE)
+        ServiceAssignment.objects.create(
+            service_record=record, technician=self.technician, assigned_by=self.manager
+        )
+
+        self.completed_vehicle = make_vehicle(registration_number="VSCOPE-COMPLETED")
+        completed_record = make_record(
+            self.completed_vehicle,
+            self.manager,
+            status=ServiceRecord.Status.COMPLETED,
+            completed_at=timezone.now(),
+            completed_odometer=self.completed_vehicle.current_odometer,
+        )
+        ServiceAssignment.objects.create(
+            service_record=completed_record, technician=self.technician, assigned_by=self.manager
+        )
+
+        self.unassigned_vehicle = make_vehicle(registration_number="VSCOPE-UNASSIGNED")
+
+    def test_technician_sees_only_assigned_vehicles(self):
+        self.client.force_login(self.technician)
+        response = self.client.get(reverse("vehicle-list"))
+        registrations = {v.registration_number for v in response.context["vehicles"]}
+        self.assertEqual(
+            registrations, {"VSCOPE-ASSIGNED", "VSCOPE-COMPLETED"}
+        )
+
+    def test_technician_with_completed_assignment_still_sees_vehicle(self):
+        self.client.force_login(self.technician)
+        response = self.client.get(reverse("vehicle-detail", args=[self.completed_vehicle.pk]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_technician_gets_403_on_unassigned_vehicle_detail(self):
+        self.client.force_login(self.technician)
+        response = self.client.get(reverse("vehicle-detail", args=[self.unassigned_vehicle.pk]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_unrelated_technician_sees_no_vehicles(self):
+        self.client.force_login(self.other_technician)
+        response = self.client.get(reverse("vehicle-list"))
+        self.assertEqual(list(response.context["vehicles"]), [])
+
+    def test_manager_still_sees_everything(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("vehicle-list"))
+        registrations = {v.registration_number for v in response.context["vehicles"]}
+        self.assertEqual(
+            registrations, {"VSCOPE-ASSIGNED", "VSCOPE-COMPLETED", "VSCOPE-UNASSIGNED"}
+        )
+
+    def test_manager_archived_list_unaffected(self):
+        # ArchivedVehicleListView is FleetManagerRequiredMixin-only, so
+        # technician scoping never runs there at all -- confirms it stays
+        # that way rather than accidentally picking up the new mixin.
+        self.unassigned_vehicle.is_archived = True
+        self.unassigned_vehicle.save(update_fields=["is_archived"])
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("vehicle-archived-list"))
+        self.assertIn(self.unassigned_vehicle, response.context["vehicles"])
+
+    def test_technician_gets_403_not_redirect_on_archived_list(self):
+        self.client.force_login(self.technician)
+        response = self.client.get(reverse("vehicle-archived-list"))
+        self.assertEqual(response.status_code, 403)

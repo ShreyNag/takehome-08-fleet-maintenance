@@ -7,7 +7,12 @@ from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 from django.views.generic.detail import SingleObjectMixin
 
-from accounts.mixins import FleetManagerRequiredMixin, ManagerOrAssignedTechnicianMixin
+from accounts.mixins import (
+    FleetManagerRequiredMixin,
+    ManagerOrAssignedTechnicianMixin,
+    VehicleManagerOrAssignedTechnicianMixin,
+    VehicleTechnicianScopedQuerysetMixin,
+)
 from .forms import (
     BookServiceForm,
     CompleteServiceForm,
@@ -27,16 +32,13 @@ from .services import (
 )
 
 
-class VehicleListView(LoginRequiredMixin, ListView):
-    """Visible to both roles -- technicians need to see the fleet too.
-    Create/edit/archive controls are hidden in the template for
-    non-managers, but that's cosmetic; the views those links point to
-    enforce it server-side on their own.
-
-    No get_queryset() override: ListView defaults to
-    Vehicle._default_manager.all(), and Vehicle.objects (the filtered,
-    archived-excluding manager) is declared first in session 2, so
-    archived vehicles are excluded here for free.
+class VehicleListView(VehicleTechnicianScopedQuerysetMixin, LoginRequiredMixin, ListView):
+    """Visible to both roles -- but a technician now sees only vehicles
+    they have at least one ServiceAssignment against (any status,
+    including completed -- past work is still their work). Create/edit/
+    archive controls are hidden in the template for non-managers, but
+    that's cosmetic; the views those links point to enforce it
+    server-side on their own.
     """
 
     model = Vehicle
@@ -44,8 +46,12 @@ class VehicleListView(LoginRequiredMixin, ListView):
     context_object_name = "vehicles"
 
 
-class VehicleDetailView(LoginRequiredMixin, DetailView):
-    """Visible to both roles.
+class VehicleDetailView(VehicleManagerOrAssignedTechnicianMixin, DetailView):
+    """Visible to both roles -- managers unconditionally, technicians only
+    for a vehicle they have at least one ServiceAssignment against (any
+    status). VehicleManagerOrAssignedTechnicianMixin.get_object() 403s an
+    unassigned technician rather than 404ing them, same reasoning as
+    ManagerOrAssignedTechnicianMixin for ServiceRecord.
 
     Overrides get_queryset() to Vehicle.all_objects: the default manager
     excludes archived vehicles, but goal 2 requires archiving to preserve

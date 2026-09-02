@@ -72,3 +72,51 @@ class ManagerOrAssignedTechnicianMixin(LoginRequiredMixin):
         if user.is_technician and obj.technicians.filter(pk=user.pk).exists():
             return obj
         raise PermissionDenied
+
+
+class VehicleTechnicianScopedQuerysetMixin:
+    """Vehicle's sibling to TechnicianScopedQuerysetMixin above -- kept
+    separate rather than folded in with a branch, because the two don't
+    share a filter shape.
+
+    TechnicianScopedQuerysetMixin filters a queryset whose OWN model has a
+    direct `technicians` M2M field (ServiceRecord): `.filter(technicians=
+    user)`, one hop, no row fan-out (ServiceAssignment's (service_record,
+    technician) uniqueness means at most one matching through-row per
+    record).
+
+    Vehicle has no such field. A technician's claim on a vehicle is
+    inherited from every ServiceRecord ever raised against it, in ANY
+    status -- including COMPLETED, since past work is still their work --
+    so this has to traverse a reverse FK plus an M2M
+    (`service_records__technicians`), and a vehicle with several matching
+    records would otherwise repeat once per record without `.distinct()`.
+    Still a plain field-name-string filter, so accounts stays free of a
+    hard dependency on fleet.models.
+    """
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if user.is_technician:
+            return queryset.filter(service_records__technicians=user).distinct()
+        return queryset
+
+
+class VehicleManagerOrAssignedTechnicianMixin(LoginRequiredMixin):
+    """Object-level companion to VehicleTechnicianScopedQuerysetMixin, for
+    VehicleDetailView -- same reasoning as ManagerOrAssignedTechnicianMixin:
+    a queryset pre-filtered to "vehicles this technician can see" would
+    turn an unauthorized vehicle into a plain Http404 via get_object(), not
+    the 403 the brief calls for. Fetches from the view's own (unfiltered)
+    queryset and denies access explicitly afterward instead.
+    """
+
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset)
+        user = self.request.user
+        if user.is_fleet_manager:
+            return obj
+        if user.is_technician and obj.service_records.filter(technicians=user).exists():
+            return obj
+        raise PermissionDenied
