@@ -9,7 +9,10 @@ happens inside an explicit transaction.atomic() block, in this one file, so
 there is exactly one place the rules live.
 """
 
+from datetime import timedelta
+
 from django.db import transaction
+from django.utils import timezone
 
 from .models import ServiceAssignment, ServiceRecord, TimelineEvent
 
@@ -128,5 +131,44 @@ def start_service(record, actor):
         old_status = record.status
         record.status = ServiceRecord.Status.IN_SERVICE
         record.save(update_fields=["status", "updated_at"])
+        _record_status_change(record, actor, old_status)
+    return record
+
+
+def complete_service(record, completed_odometer, actor):
+    """IN_SERVICE -> COMPLETED.
+
+    Resets both due-counters on the vehicle from THIS completion's date and
+    odometer -- not from "today" and not from vehicle.current_odometer --
+    so a completion recorded a day after the actual work still schedules
+    the next service the correct interval-length after the work, not after
+    whenever someone got around to logging it.
+    """
+    _check_transition(record, ServiceRecord.Status.COMPLETED)
+    vehicle = record.vehicle
+    if completed_odometer < vehicle.current_odometer:
+        raise InvalidTransitionInput(
+            f"Completion odometer ({completed_odometer} km) is lower than the "
+            f"vehicle's current odometer ({vehicle.current_odometer} km) -- "
+            "a vehicle cannot have driven backwards."
+        )
+    completed_at = timezone.now()
+    with transaction.atomic():
+        old_status = record.status
+        record.status = ServiceRecord.Status.COMPLETED
+        record.completed_at = completed_at
+        record.completed_odometer = completed_odometer
+        record.save(
+            update_fields=["status", "completed_at", "completed_odometer", "updated_at"]
+        )
+
+        vehicle.next_due_date = completed_at.date() + timedelta(days=vehicle.service_interval_days)
+        vehicle.next_due_odometer = completed_odometer + vehicle.service_interval_km
+        if completed_odometer > vehicle.current_odometer:
+            vehicle.current_odometer = completed_odometer
+        vehicle.save(
+            update_fields=["next_due_date", "next_due_odometer", "current_odometer", "updated_at"]
+        )
+
         _record_status_change(record, actor, old_status)
     return record
