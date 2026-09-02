@@ -53,16 +53,16 @@ Mark each honestly. Partial is fine — say what is partial.
 
 | # | Goal | Status | Notes |
 |---|------|--------|-------|
-| 1 | Accounts and roles | Partial | Email/password auth, both roles, enforcement wired into every view and asserted by tests (403 from the server, not hidden buttons). Manager control of assignment lands in session 5. |
-| 2 | Vehicles | Done | Create, edit, archive, restore. Archived vehicles leave the default list and keep their service history. Derived next-due fields deliberately absent from the form. |
-| 3 | Service records | Done | Manager creates against a vehicle; assignee edits the description only. Vehicle detail shows service history. Assignment is displayed here but managed in session 5. |
-| 4 | Service lifecycle with rules | Not done | Records are created as Due; nothing moves them yet. Session 4. |
-| 5 | Assignment | Partial | Through-model and permission checks exist and are tested; no UI, assignments made via admin. Session 5. |
-| 6 | Finding service records | Not done | |
-| 7 | Bulk odometer CSV + history export | Not done | |
-| 8 | Dashboard | Not done | |
-| 9 | Immutable history | Partial | Model is append-only, enforced at save/delete and in the admin. Nothing writes events yet — session 4. |
-| 10 | Overdue service alerts | Not done | Dismissal model exists, keyed per record. |
+| 1 | Accounts and roles | Done | Enforced server-side, asserted by tests (403, not hidden controls). Technicians scoped to their own records and the vehicles behind them. |
+| 2 | Vehicles | Done | Create, edit, archive, restore. Fleet list shows next-due date, next-due odometer and a service status computed as a SQL annotation. |
+| 3 | Service records | Done | Manager creates; assignee edits description only. Vehicle detail shows service history. |
+| 4 | Service lifecycle with rules | Partial | Full state machine, server-side rejection with explanatory messages, both counters reset from the completion date and reading. Mileage threshold fires on odometer update and on CSV import. The date threshold needs `check_due_vehicles`, which nothing schedules yet — closing in session 6. |
+| 5 | Assignment | Done | Managers add and remove technicians at any point; both write timeline events. Technicians land on a cross-vehicle list of their own records after login. |
+| 6 | Finding service records | Done | Server-side search, filters, sorting and pagination with total match count. Sort parameter allowlisted. Query count asserted flat with result size. |
+| 7 | Bulk odometer CSV + history export | Done | Per-row report with six distinct rejection reasons; valid rows apply when others fail; each row in its own transaction. Successful updates trigger the due check. Streaming export sharing filter logic with the list view. |
+| 8 | Dashboard | Not done | Session 6. |
+| 9 | Immutable history | Done | Every transition, assignment and note writes an event in the same transaction as the change. Append-only at save, delete and admin level. |
+| 10 | Overdue service alerts | Not done | Overdue available as a queryset filter; no alerts area or badge yet — session 6. |
 
 ## How much time did you actually spend?
 

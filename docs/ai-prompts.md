@@ -1024,3 +1024,155 @@ reading the local SQLite fallback. One line settled it:
 Third instance of the failure mode recorded in decision #12 — reading a proxy
 signal as if it were the thing itself. Sessions 5 and 6 are developed entirely
 locally so the browser, the shell and the tests all read the same database.
+
+## Session 5 — assignment, cross-vehicle search, CSV import and export
+
+Goals 5, 6 and 7 in one session. Too much for one sitting — see the end.
+
+### A bug report that wasn't a bug
+
+A technician couldn't see a record I'd booked and assigned to them. Rather
+than describe the symptom and ask for a fix, I wrote the prompt to diagnose
+first, enumerating four possible causes and explicitly permitting the
+conclusion that none applied:
+
+**Claude Code:**
+
+> Bug report — technician cannot see a service record assigned to them.
+>
+> As a fleet manager: created a vehicle, created a service record on it,
+> booked it and assigned a technician. Then logged in as that technician —
+> the record does not appear for them. I have not isolated whether this is a
+> scoping failure, a 403, or the assignment row never being created, so
+> diagnose before fixing.
+>
+> My data is on Neon (the deployed app), not local SQLite, so `manage.py
+> shell` against the local fallback shows nothing. Reproduce it with a test
+> rather than by inspecting my data.
+>
+> ## Diagnose first, in this order
+>
+> 1. Write a failing test reproducing it end to end: manager creates a vehicle
+>    and record, calls book_service with a technician, then the technician
+>    client requests the vehicle detail and the record detail. Run it and tell
+>    me which assertion fails before changing any code.
+> 2. If book_service is not creating a ServiceAssignment row, that is the bug —
+>    the technician has no assignment, so every scoping mixin correctly
+>    excludes them.
+> 3. If the assignment exists but the technician gets 403 or an empty list, the
+>    bug is in last session's mixins. The vehicle-side traversal is
+>    `service_records__technicians=user` with `.distinct()` — verify it matches
+>    the actual related_name and M2M path.
+> 4. If the record is reachable directly but simply not listed anywhere, that
+>    is NOT a bug — the technician's cross-vehicle record list is goal 5, which
+>    I am building next. Say so and stop; do not build it here.
+>
+> Tell me which of the four it is before fixing.
+>
+> ## Do not
+>
+> - Build anything from session 5. I am running that as a separate prompt next.
+> - Change the scoping rule itself (decision #18). If that rule is producing
+>   the wrong result, tell me rather than changing it.
+
+**Result: category 4.** Nothing was broken — there was simply no view
+surfacing a technician's work across vehicles yet.
+
+Step 4 is why that came back honestly. A coding agent asked to fix a bug will
+find something to change; naming "nothing is wrong" as a permitted conclusion
+is what prevented an invented fix. Fourth instance of decision #12.
+
+Separately, I asked it to justify a session 4 commit I couldn't account for
+(`e30ada6`). It held up: `book_service` used `.create()` against a
+`unique_together`, so booking a record whose technician was already assigned
+raised `IntegrityError` and surfaced as a 500. Fixed with `get_or_create`.
+
+### The session 5 prompt
+
+Structure was left open deliberately — the prompt asked for a plan first on
+where the CSV logic should live and how the per-row report should be shaped,
+since those are cheapest to correct before implementation.
+
+**Claude Code:**
+
+> [PASTE THE FULL SESSION 5 PROMPT HERE — it's in the chat above, unchanged.]
+
+### What the plan step produced
+
+Three improvements on what I'd specified, all accepted:
+
+- **Three modules, not one.** CSV parsing is an IO concern with no overlap with
+  lifecycle rules. Separately, a shared `filters.py` between the list view and
+  the export means goal 7's "respect the active filters" can't drift from what
+  goal 6 actually applied. Decision #22.
+- **Archived as its own rejection reason**, via `Vehicle.all_objects` — a
+  manager uploading readings for a van archived last week should be told that,
+  not told it doesn't exist.
+- **First-occurrence-wins on duplicate registrations.** Processing both means
+  the later row silently overwrites the earlier; rejecting both penalises a
+  valid row for a later mistake.
+
+### Where I corrected it
+
+**Silent sort fallback.** It proposed swallowing an unrecognised sort
+parameter. Inconsistent with a codebase where illegal transitions were built
+to explain themselves. Fall back, but say so. Decision #24.
+
+**Suppressing the assignment event on booking.** It proposed a
+`write_event=False` flag so an existing single-event test would keep passing.
+Goal 9 requires every assignment in the timeline. The test encoded an
+assumption from before assignment was a first-class action, so the test
+changed instead. Decision #23.
+
+The principle: changing a test because requirements grew is legitimate.
+Changing behaviour to keep a test green inverts which is authoritative.
+
+### The bug worth reading: header detection swallowing a row
+
+Found by its own tests before I ran the import. I asked for specifics rather
+than accepting "caught and fixed":
+
+**Claude Code:**
+
+> Question about commit 9ca29d2 (bulk odometer CSV import), not a request to
+> change anything. You mentioned catching a header-detection bug — "a lone bad
+> row was being misread as a header." I'm writing it up and need specifics:
+> what the original logic did and what input it got wrong; what the
+> user-visible consequence was; what the fix was; which test demonstrates it;
+> and whether you found it yourself while writing tests or it came out of an
+> existing test failing. Do not change any code.
+
+The original heuristic decided "is row 1 a header?" by whether its second cell
+failed to parse as an integer — true for a header, but equally true for a bad
+data row. So a one-line file `CSV-1,not-a-number` was classified as a header
+and skipped.
+
+The consequence was worse than a mis-parse. The row didn't produce a wrong
+rejection; it vanished. The report returned `total_rows=0, succeeded=0,
+rejected=0` — silent data loss presented as "nothing to report", which is
+exactly what goal 7's per-row report exists to prevent.
+
+Fixed by matching against a fixed vocabulary of known column names on either
+cell instead of inferring from a parse failure. A bad data row now flows into
+normal validation and returns a proper rejection.
+
+It surfaced from `test_non_integer_reading_rejected` — one of the "test every
+rejection reason separately" tests the prompt required — failing on first run
+with `AssertionError: 0 != 1`. A named regression test,
+`test_single_bad_row_is_not_mistaken_for_a_header`, was added alongside.
+
+What made it findable: requiring header-absence handling and each rejection
+reason tested in isolation. One combined test with a well-formed header would
+never have hit it.
+
+### What went wrong, and what I verified
+
+**Scope.** Three goals, two new modules, five commits, 56 tests to 127. Should
+have been split across two sittings; the clearest estimation error in this
+project.
+
+**Verification.** Exercised the import by hand against the deployed app with a
+file built to fail four ways — unknown registration, duplicate row, text where
+an integer belongs, reading lower than current — alongside three valid rows.
+Four distinct reasons with correct line numbers, three rows applied. Also
+confirmed a headerless file parses and a non-CSV upload is rejected cleanly.

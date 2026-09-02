@@ -215,6 +215,17 @@ mishaps: before concluding anything is broken, confirm which surface is being
 read. Sessions 5 and 6 are developed entirely locally so the browser, the
 shell and the tests all agree.
 
+**Fourth instance, session 5:** I reported a bug — a technician could not see a
+record assigned to them — and asked for a fix. The diagnosis came back
+category 4 of the four possibilities the prompt listed: nothing was broken. The
+record was reachable directly; there was simply no cross-vehicle list surfacing
+it yet, which was the next thing being built. Same shape as the other three:
+an absent surface read as broken logic.
+
+Worth recording that the prompt asking it to *diagnose before fixing*, with an
+explicit "if it is this, say so and stop," is what prevented it from
+manufacturing a fix for a bug that did not exist.
+
 ## 13. Keeping derived and lifecycle fields off every form
 
 **Session 3.**
@@ -400,3 +411,87 @@ This surfaces the consequence of the session 4 call that a brand-new vehicle
 is not immediately due. That decision is defensible, but it means every new
 vehicle needs one manually created service record before automatic tracking
 begins, and the fleet list now makes that visible rather than silent.
+
+## 22. Three modules, not one service layer
+
+**Session 5.**
+
+**Chose:** `assign_technician` / `unassign_technician` in `services.py`
+alongside the transition functions; scoping, search, filter and sort logic in a
+new `filters.py`; CSV parsing, validation, report generation and export
+serialisation in a new `csv_io.py`.
+**Rejected:** Everything in `services.py`, as originally specified.
+
+Decision from session 4 was that business logic lives in one place so there is
+one file to point at. That holds for lifecycle rules. It does not extend to
+CSV parsing, which is an IO concern with its own problems — BOM handling, CRLF,
+header detection, six rejection paths — and would have doubled the length of
+`services.py` without sharing anything with it.
+
+`filters.py` earns its place differently: goal 7 requires the export to respect
+the active filters, and goal 6 requires the list view to apply them. One module
+used by both means the two cannot drift. Two copies of the same filter logic is
+a bug waiting to be reported as "the export doesn't match what I was looking
+at."
+
+Proposed by the coding tool in response to a prompt that left the structure
+open. Accepted on the drift argument.
+
+## 23. Writing the assignment event on booking
+
+**Session 5.**
+
+**Chose:** `book_service` calls `assign_technician`, which writes a
+`TECHNICIAN_ASSIGNED` event alongside the `DUE → BOOKED` status event. Two
+events per booking.
+**Rejected:** Suppressing the assignment event on the booking path, keeping one
+event per booking.
+
+The tool proposed a `write_event=False` flag so that an existing test asserting
+exactly one event per booking would keep passing, reasoning that the
+`ServiceAssignment` row already records who assigned whom and when.
+
+The reasoning is real but goal 9 says the timeline shows "every technician
+assignment and unassignment." Under the suppressed version, a booking attaches
+a technician and the timeline shows only a status change — someone reading it
+to find when a technician came onto the record would not find out.
+
+The test was updated to expect two events. It encoded an assumption from before
+assignment existed as a first-class action; changing a test because
+requirements grew is legitimate, suppressing an audit event to keep a test green
+is not.
+
+## 24. Sort fallback that tells the user
+
+**Session 5.**
+
+**Chose:** An unrecognised sort parameter falls back to the default AND
+surfaces a message saying the sort was ignored.
+**Rejected:** Silent fallback.
+
+The tool proposed silent. It doesn't break anything, but a user clicking a
+column header and getting an unsorted-looking page has no way to know why.
+
+More importantly it is inconsistent with the codebase: goal 4's illegal
+transitions were deliberately built to reject *with a message explaining why*,
+rather than failing quietly. The same principle applies to any input the server
+declines to honour.
+
+The sort parameter is still validated against an allowlist before reaching
+`order_by` — passing an arbitrary column name through is an injection surface,
+and that check is independent of whether the user is told.
+
+## 25. `icontains` over Postgres full-text search
+
+**Session 5.**
+
+**Chose:** `description__icontains` for goal 6's text search.
+**Rejected:** A `tsvector` column with a GIN index.
+
+`ILIKE '%term%'` cannot use a standard index, so this degrades at scale. At a
+few dozen vehicles and a few hundred records it is imperceptible, and full-text
+search would have meant a migration, a trigger or a save hook to maintain the
+vector, and a different query API — time better spent on goals 8 and 10.
+
+Recorded in a comment at the call site as the fix if it ever gets slow, and in
+`schema.md` as the second thing that breaks at 100x.

@@ -121,3 +121,21 @@ cheapest things to trim if time runs short.
   which read as broken lifecycle logic for a while. Settled by checking
   `settings.DATABASES["default"]["ENGINE"]`. Sessions 5 and 6 are developed
   locally so that the shell and the browser agree.
+
+  ### Session 5 — Assignment, search, CSV import and export
+- **Estimated:** 2h
+- **Actual:** 4h 20m
+- **Where it went:** Badly over. This session carried three goals, two new
+  modules and roughly seventy new tests (56 → 127), which is more than double
+  any other session. The CSV import alone has six rejection paths, each needing
+  its own test. Splitting it — assignment and search in one sitting, CSV in
+  another — would have been the right call, and the fact that I planned it as
+  one session is the clearest estimation error in this project.
+- **Cut or deferred:** Nothing cut. Full-text search deliberately not used —
+  `icontains` is correct at this scale and the Postgres GIN index setup was not
+  worth the time; noted in a comment as the fix if it ever gets slow.
+- **What I got right:** insisting on a plan before implementation. The
+  three-module split (services / filters / csv_io) was proposed by the tool and
+  is better than the single-file structure I had specified, and sharing
+  `filters.py` between the list view and the export removed a whole class of
+  drift bug before it existed.
