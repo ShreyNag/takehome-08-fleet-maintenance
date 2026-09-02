@@ -17,4 +17,16 @@ urlpatterns = [
     ),
     path("service-records/<int:pk>/", views.ServiceRecordDetailView.as_view(), name="service-record-detail"),
     path("service-records/<int:pk>/edit/", views.ServiceRecordUpdateView.as_view(), name="service-record-update"),
+    path("service-records/<int:pk>/book/", views.ServiceRecordBookView.as_view(), name="service-record-book"),
+    path("service-records/<int:pk>/start/", views.ServiceRecordStartView.as_view(), name="service-record-start"),
+    path(
+        "service-records/<int:pk>/complete/",
+        views.ServiceRecordCompleteView.as_view(),
+        name="service-record-complete",
+    ),
+    path(
+        "service-records/<int:pk>/notes/",
+        views.ServiceRecordAddNoteView.as_view(),
+        name="service-record-add-note",
+    ),
 ]

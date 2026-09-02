@@ -1,15 +1,30 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
+from django.views.generic.detail import SingleObjectMixin
 
 from accounts.mixins import FleetManagerRequiredMixin, ManagerOrAssignedTechnicianMixin
-from .forms import ServiceRecordDescriptionForm, VehicleForm
-from .models import ServiceRecord, Vehicle
-from .services import ensure_due_record
+from .forms import (
+    BookServiceForm,
+    CompleteServiceForm,
+    ServiceRecordDescriptionForm,
+    TimelineNoteForm,
+    VehicleForm,
+)
+from .models import ServiceRecord, TimelineEvent, Vehicle
+from .services import (
+    ALLOWED_TRANSITIONS,
+    InvalidTransitionInput,
+    ServiceLifecycleError,
+    book_service,
+    complete_service,
+    ensure_due_record,
+    start_service,
+)
 
 
 class VehicleListView(LoginRequiredMixin, ListView):
@@ -185,7 +200,39 @@ class ServiceRecordCreateView(FleetManagerRequiredMixin, CreateView):
         return reverse("service-record-detail", kwargs={"pk": self.object.pk})
 
 
-class ServiceRecordDetailView(ManagerOrAssignedTechnicianMixin, DetailView):
+class ServiceRecordDetailContextMixin:
+    """Shared by the read-only detail view and every transition action
+    view below: both can end up rendering the same servicerecord_detail.html
+    template -- the detail view always, an action view only when it
+    rejects an illegal move and needs to re-render the page with an error
+    message and a 4xx status rather than redirecting (see
+    ServiceRecordActionView.post).
+    """
+
+    def build_detail_context(self, service_record):
+        # Who may act is identical to who may view this page at all
+        # (ManagerOrAssignedTechnicianMixin), so no separate permission
+        # check is needed here -- reaching this method already proves it.
+        # Which action is legal is read straight from ALLOWED_TRANSITIONS,
+        # the single source of truth the service layer itself checks
+        # against, rather than duplicating the state machine's shape here.
+        allowed = ALLOWED_TRANSITIONS.get(service_record.status, set())
+        context = {
+            "service_record": service_record,
+            "timeline": service_record.timeline.select_related("actor"),
+            "note_form": TimelineNoteForm(),
+            "show_book_form": ServiceRecord.Status.BOOKED in allowed,
+            "show_start_button": ServiceRecord.Status.IN_SERVICE in allowed,
+            "show_complete_form": ServiceRecord.Status.COMPLETED in allowed,
+        }
+        if context["show_book_form"]:
+            context["book_form"] = BookServiceForm()
+        if context["show_complete_form"]:
+            context["complete_form"] = CompleteServiceForm()
+        return context
+
+
+class ServiceRecordDetailView(ServiceRecordDetailContextMixin, ManagerOrAssignedTechnicianMixin, DetailView):
     """Visible to managers, and to technicians only if assigned --
     enforced by ManagerOrAssignedTechnicianMixin.get_object(), which 403s
     rather than 404s an unassigned technician (see accounts/mixins.py for
@@ -194,6 +241,11 @@ class ServiceRecordDetailView(ManagerOrAssignedTechnicianMixin, DetailView):
     model = ServiceRecord
     template_name = "fleet/servicerecord_detail.html"
     context_object_name = "service_record"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(self.build_detail_context(self.object))
+        return context
 
 
 class ServiceRecordUpdateView(ManagerOrAssignedTechnicianMixin, UpdateView):
@@ -222,3 +274,101 @@ class ServiceRecordUpdateView(ManagerOrAssignedTechnicianMixin, UpdateView):
         response = super().form_valid(form)
         messages.success(self.request, "Description updated.")
         return response
+
+
+class ServiceRecordActionView(ServiceRecordDetailContextMixin, ManagerOrAssignedTechnicianMixin, SingleObjectMixin, View):
+    """Base for the three transition actions (book/start/complete). Same
+    permission as the detail/edit views: a manager, or a technician
+    assigned to this record.
+
+    On success: redirect back to the detail page (post/redirect/get, so a
+    refresh doesn't resubmit the action) with a success message.
+    On a ServiceLifecycleError: re-render the SAME detail page directly
+    (no redirect) with an error message and an HTTP 400 -- goal 4 wants
+    the rejection to come back as a 4xx with an explanation, and a
+    redirect's eventual 200 wouldn't satisfy that. Safe to reuse
+    self.object here because every ServiceLifecycleError in services.py is
+    raised before any mutation happens (see the note at the top of
+    services.py) -- self.object is never stale when this fires.
+    """
+
+    model = ServiceRecord
+    http_method_names = ["post"]
+    template_name = "fleet/servicerecord_detail.html"
+    success_message = ""
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        try:
+            self.perform(request)
+        except ServiceLifecycleError as exc:
+            messages.error(request, str(exc))
+            context = self.build_detail_context(self.object)
+            return render(request, self.template_name, context, status=400)
+        messages.success(request, self.success_message)
+        return redirect("service-record-detail", pk=self.object.pk)
+
+    def perform(self, request):
+        raise NotImplementedError
+
+
+class ServiceRecordBookView(ServiceRecordActionView):
+    success_message = "Service booked."
+
+    def perform(self, request):
+        form = BookServiceForm(request.POST)
+        if not form.is_valid():
+            raise InvalidTransitionInput("Enter a valid scheduled date and technician.")
+        book_service(
+            self.object,
+            scheduled_date=form.cleaned_data["scheduled_date"],
+            technician=form.cleaned_data["technician"],
+            actor=request.user,
+        )
+
+
+class ServiceRecordStartView(ServiceRecordActionView):
+    success_message = "Service started."
+
+    def perform(self, request):
+        start_service(self.object, actor=request.user)
+
+
+class ServiceRecordCompleteView(ServiceRecordActionView):
+    success_message = "Service completed."
+
+    def perform(self, request):
+        form = CompleteServiceForm(request.POST)
+        if not form.is_valid():
+            raise InvalidTransitionInput("Enter a valid odometer reading.")
+        complete_service(
+            self.object,
+            completed_odometer=form.cleaned_data["completed_odometer"],
+            actor=request.user,
+        )
+
+
+class ServiceRecordAddNoteView(ManagerOrAssignedTechnicianMixin, SingleObjectMixin, View):
+    """NOTE_ADDED timeline events -- same permission as viewing the record.
+    Not a transition, so it doesn't go through services.py's state machine;
+    a single TimelineEvent.objects.create() is already one atomic write on
+    its own, no explicit transaction.atomic() needed.
+    """
+
+    model = ServiceRecord
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = TimelineNoteForm(request.POST)
+        if form.is_valid():
+            TimelineEvent.objects.create(
+                service_record=self.object,
+                event_type=TimelineEvent.EventType.NOTE_ADDED,
+                actor=request.user,
+                note=form.cleaned_data["note"],
+            )
+            messages.success(request, "Note added.")
+        else:
+            messages.error(request, "Note cannot be empty.")
+        return redirect("service-record-detail", pk=self.object.pk)

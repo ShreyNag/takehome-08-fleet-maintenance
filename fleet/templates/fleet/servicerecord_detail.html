@@ -5,14 +5,68 @@
 {% block content %}
   <h1>Service record</h1>
   <p>Vehicle: <a href="{% url 'vehicle-detail' service_record.vehicle.pk %}">{{ service_record.vehicle }}</a></p>
-  <p>Status: {{ service_record.get_status_display }}</p>
+  <p>
+    Status: {{ service_record.get_status_display }}
+    {% if service_record.is_overdue %}<strong class="overdue">(overdue)</strong>{% endif %}
+  </p>
   <p>Description: {{ service_record.description }}</p>
-  <p>Created by {{ service_record.created_by }} on {{ service_record.created_at|date:"Y-m-d H:i" }}</p>
+  <p>
+    Created by {{ service_record.created_by|default:"System (auto-generated)" }}
+    on {{ service_record.created_at|date:"Y-m-d H:i" }}
+  </p>
+  {% if service_record.scheduled_date %}<p>Scheduled for {{ service_record.scheduled_date }}</p>{% endif %}
+  {% if service_record.completed_at %}
+    <p>Completed {{ service_record.completed_at|date:"Y-m-d H:i" }} at {{ service_record.completed_odometer }} km</p>
+  {% endif %}
 
   <p><a href="{% url 'service-record-update' service_record.pk %}">Edit description</a></p>
 
+  <h2>Actions</h2>
+  {% if show_book_form %}
+    <form method="post" action="{% url 'service-record-book' service_record.pk %}">
+      {% csrf_token %}
+      {{ book_form.as_p }}
+      <button type="submit">Book service</button>
+    </form>
+  {% endif %}
+  {% if show_start_button %}
+    <form method="post" action="{% url 'service-record-start' service_record.pk %}">
+      {% csrf_token %}
+      <button type="submit">Start service</button>
+    </form>
+  {% endif %}
+  {% if show_complete_form %}
+    <form method="post" action="{% url 'service-record-complete' service_record.pk %}">
+      {% csrf_token %}
+      {{ complete_form.as_p }}
+      <button type="submit">Complete service</button>
+    </form>
+  {% endif %}
+  {% if not show_book_form and not show_start_button and not show_complete_form %}
+    <p><em>No actions available — this record is completed.</em></p>
+  {% endif %}
+
   <h2>Timeline</h2>
-  <!-- TimelineEvent writing is session 4 -- left as an empty placeholder
-       rather than faked, per the brief. -->
-  <p><em>Coming in session 4.</em></p>
+  <ul class="timeline">
+    {% for event in timeline %}
+      <li>
+        <strong>{{ event.get_event_type_display }}</strong>
+        {% if event.old_value or event.new_value %}({{ event.old_value }} &rarr; {{ event.new_value }}){% endif %}
+        &mdash; {{ event.actor|default:"System" }}, {{ event.created_at|date:"Y-m-d H:i" }}
+        {% if event.note %}<br><em>{{ event.note }}</em>{% endif %}
+      </li>
+    {% empty %}
+      <li>No timeline events yet.</li>
+    {% endfor %}
+  </ul>
+
+  <h3>Add a note</h3>
+  <!-- No edit/delete controls anywhere on this page: TimelineEvent is
+       append-only at the model level, and the UI shouldn't suggest
+       otherwise by offering a control that would just fail. -->
+  <form method="post" action="{% url 'service-record-add-note' service_record.pk %}">
+    {% csrf_token %}
+    {{ note_form.as_p }}
+    <button type="submit">Add note</button>
+  </form>
 {% endblock %}

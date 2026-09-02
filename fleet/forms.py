@@ -1,5 +1,6 @@
 from django import forms
 
+from accounts.models import User
 from .models import ServiceRecord, Vehicle
 
 
@@ -27,9 +28,35 @@ class ServiceRecordDescriptionForm(forms.ModelForm):
         model = ServiceRecord
         # Only field either role is allowed to touch through a form. status,
         # due_since, scheduled_date, completed_at, completed_odometer and
-        # technicians are all lifecycle/assignment fields owned by later
-        # sessions -- deliberately absent, not merely hidden in the
-        # template. Used for both create (view sets vehicle/status/
-        # due_since/created_by in form_valid) and edit (description-only
-        # change, goal 3).
+        # technicians are all lifecycle/assignment fields owned by
+        # fleet/services.py -- deliberately absent from every form,
+        # everywhere, not merely hidden in a template. Used for both
+        # create (the view sets vehicle/status/due_since/created_by in
+        # form_valid) and edit (description-only change, goal 3).
         fields = ["description"]
+
+
+class BookServiceForm(forms.Form):
+    """DUE -> BOOKED. Not a ModelForm -- these two inputs are arguments to
+    book_service(), not a 1:1 mapping onto ServiceRecord fields (the
+    technician goes into a ServiceAssignment row, not a ServiceRecord
+    column)."""
+
+    scheduled_date = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}))
+    technician = forms.ModelChoiceField(
+        queryset=User.objects.filter(role=User.Role.TECHNICIAN),
+        label="Assign technician",
+    )
+
+
+class CompleteServiceForm(forms.Form):
+    """IN_SERVICE -> COMPLETED."""
+
+    completed_odometer = forms.IntegerField(min_value=0, label="Odometer reading (km)")
+
+
+class TimelineNoteForm(forms.Form):
+    """NOTE_ADDED timeline events -- open to managers and the assigned
+    technician, same permission as viewing the record at all."""
+
+    note = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}))
