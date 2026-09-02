@@ -1,6 +1,10 @@
+from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.views.generic import DetailView, ListView
+from django.urls import reverse
+from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
+from accounts.mixins import FleetManagerRequiredMixin
+from .forms import VehicleForm
 from .models import Vehicle
 
 
@@ -51,3 +55,32 @@ class VehicleDetailView(LoginRequiredMixin, DetailView):
         # it either.
         context["service_records"] = self.object.service_records.order_by("-created_at")
         return context
+
+
+class VehicleFormMixin:
+    """Shared by create and edit -- same form, same template, same
+    success-redirect and message. Enough real duplication (5+ identical
+    lines twice) to be worth factoring, unlike the two-line cases the
+    project otherwise leaves alone."""
+
+    model = Vehicle
+    form_class = VehicleForm
+    template_name = "fleet/vehicle_form.html"
+
+    def get_success_url(self):
+        return reverse("vehicle-detail", kwargs={"pk": self.object.pk})
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, f"{self.object.registration_number} saved.")
+        return response
+
+
+class VehicleCreateView(FleetManagerRequiredMixin, VehicleFormMixin, CreateView):
+    pass
+
+
+class VehicleUpdateView(FleetManagerRequiredMixin, VehicleFormMixin, UpdateView):
+    """Scoped to the default manager (excludes archived) on purpose:
+    editing specs on an archived vehicle isn't a use case this session's
+    brief describes. Restore it first."""

@@ -5,6 +5,10 @@
 {% block content %}
   <h1>Vehicles</h1>
 
+  {% if user.is_fleet_manager %}
+    <p><a href="{% url 'vehicle-create' %}">New vehicle</a></p>
+  {% endif %}
+
   <table>
     <thead>
       <tr>
@@ -12,6 +16,7 @@
         <th>Make / model</th>
         <th>Odometer</th>
         <th>Service interval</th>
+        {% if user.is_fleet_manager %}<th></th>{% endif %}
       </tr>
     </thead>
     <tbody>
@@ -21,9 +26,12 @@
           <td>{{ vehicle.make }} {{ vehicle.model }}</td>
           <td>{{ vehicle.current_odometer }} km</td>
           <td>{{ vehicle.service_interval_days }} days / {{ vehicle.service_interval_km }} km</td>
+          {% if user.is_fleet_manager %}
+            <td><a href="{% url 'vehicle-update' vehicle.pk %}">Edit</a></td>
+          {% endif %}
         </tr>
       {% empty %}
-        <tr><td colspan="4">No vehicles yet.</td></tr>
+        <tr><td colspan="5">No vehicles yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
