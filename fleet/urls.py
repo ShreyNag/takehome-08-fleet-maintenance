@@ -17,6 +17,7 @@ urlpatterns = [
         name="service-record-create",
     ),
     path("service-records/", views.ServiceRecordListView.as_view(), name="service-record-list"),
+    path("service-records/export/", views.ServiceRecordExportView.as_view(), name="service-record-export"),
     path("service-records/<int:pk>/", views.ServiceRecordDetailView.as_view(), name="service-record-detail"),
     path("service-records/<int:pk>/edit/", views.ServiceRecordUpdateView.as_view(), name="service-record-update"),
     path("service-records/<int:pk>/book/", views.ServiceRecordBookView.as_view(), name="service-record-book"),

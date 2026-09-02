@@ -1,5 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -14,7 +15,7 @@ from accounts.mixins import (
     VehicleTechnicianScopedQuerysetMixin,
 )
 from accounts.models import User
-from .csv_io import CsvImportError, import_odometer_readings
+from .csv_io import CsvImportError, export_service_records_csv, import_odometer_readings
 from .filters import SORT_FIELDS, filtered_service_records
 from .forms import (
     AssignTechnicianForm,
@@ -545,6 +546,26 @@ class ServiceRecordListView(LoginRequiredMixin, ListView):
         context["technicians"] = User.objects.filter(role=User.Role.TECHNICIAN)
         context["statuses"] = ServiceRecord.Status.choices
         return context
+
+
+class ServiceRecordExportView(LoginRequiredMixin, View):
+    """Goal 7: streams every record the viewer can see as CSV, respecting
+    whatever filters/search/sort are in the querystring -- identical scope
+    to ServiceRecordListView because both call
+    fleet.filters.filtered_service_records with the same request.GET, so
+    an export taken from a filtered page can never show different rows
+    than the page itself.
+    """
+
+    http_method_names = ["get"]
+
+    def get(self, request, *args, **kwargs):
+        queryset, _ = filtered_service_records(request.user, request.GET)
+        response = StreamingHttpResponse(
+            export_service_records_csv(queryset), content_type="text/csv"
+        )
+        response["Content-Disposition"] = 'attachment; filename="service-records.csv"'
+        return response
 
 
 class ServiceRecordUnassignTechnicianView(FleetManagerRequiredMixin, SingleObjectMixin, View):

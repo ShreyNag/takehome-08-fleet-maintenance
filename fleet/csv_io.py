@@ -1,5 +1,4 @@
-"""CSV import: bulk odometer readings (goal 7). Export lands here too in
-the next commit.
+"""CSV import (bulk odometer readings) and export (service history).
 
 Kept out of fleet/services.py: this is file-parsing and reporting logic,
 not a ServiceRecord state transition, and it's substantial enough on its
@@ -208,3 +207,43 @@ def import_odometer_readings(uploaded_file, actor):
         report.succeeded += 1
 
     return report
+
+
+class _Echo:
+    """A pseudo-buffer for csv.writer: write() hands the string straight
+    back instead of accumulating it, which is what lets
+    export_service_records_csv be a generator StreamingHttpResponse can
+    consume a chunk at a time rather than building the whole file in
+    memory first."""
+
+    def write(self, value):
+        return value
+
+
+def export_service_records_csv(queryset):
+    """Yields one CSV line at a time for `queryset`. The caller (the
+    export view) is responsible for scope and filters -- via
+    fleet.filters.filtered_service_records, the same function the list
+    view itself uses -- so this only serialises whatever rows it's given.
+
+    iterator(chunk_size=...): streams from the database in batches instead
+    of loading the whole queryset, while still respecting the
+    prefetch_related("technicians") that queryset was built with (Django
+    only honours prefetch_related under iterator() when chunk_size is
+    given).
+    """
+    writer = csv.writer(_Echo())
+    yield writer.writerow(
+        ["Vehicle", "Status", "Scheduled date", "Completed at", "Description", "Technicians"]
+    )
+    for record in queryset.iterator(chunk_size=200):
+        yield writer.writerow(
+            [
+                record.vehicle.registration_number,
+                record.get_status_display(),
+                record.scheduled_date.isoformat() if record.scheduled_date else "",
+                record.completed_at.isoformat() if record.completed_at else "",
+                record.description,
+                "; ".join(str(technician) for technician in record.technicians.all()),
+            ]
+        )

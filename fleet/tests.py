@@ -6,6 +6,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
+from django.http import StreamingHttpResponse
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -1346,3 +1347,63 @@ class CsvImportTests(TestCase):
         self.assertNotIn("report", response.context)
         self.vehicle.refresh_from_db()
         self.assertEqual(self.vehicle.current_odometer, 10_000)
+
+
+class ServiceRecordExportTests(TestCase):
+    """Goal 7's export: StreamingHttpResponse, expected columns, role
+    scope (a technician's export contains only their records), and the
+    active filters carried over from the list view's querystring."""
+
+    def setUp(self):
+        self.manager = make_user("export-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.tech_a = make_user("export-tech-a@example.com", User.Role.TECHNICIAN)
+        self.tech_b = make_user("export-tech-b@example.com", User.Role.TECHNICIAN)
+        self.vehicle = make_vehicle(registration_number="EXPORT-1")
+
+        self.record_a = make_record(self.vehicle, self.manager, status=ServiceRecord.Status.DUE, description="Brake job")
+        ServiceAssignment.objects.create(service_record=self.record_a, technician=self.tech_a, assigned_by=self.manager)
+
+        self.record_b = make_record(self.vehicle, self.manager, status=ServiceRecord.Status.DUE, description="Oil change")
+        ServiceAssignment.objects.create(service_record=self.record_b, technician=self.tech_b, assigned_by=self.manager)
+
+    def _rows(self, response):
+        import csv as csv_module
+        import io as io_module
+
+        content = b"".join(response.streaming_content).decode("utf-8")
+        return list(csv_module.reader(io_module.StringIO(content)))
+
+    def test_response_is_streaming(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("service-record-export"))
+        self.assertIsInstance(response, StreamingHttpResponse)
+        self.assertEqual(response["Content-Type"], "text/csv")
+
+    def test_expected_columns(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("service-record-export"))
+        rows = self._rows(response)
+        self.assertEqual(
+            rows[0], ["Vehicle", "Status", "Scheduled date", "Completed at", "Description", "Technicians"]
+        )
+
+    def test_manager_export_contains_every_record(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("service-record-export"))
+        rows = self._rows(response)
+        descriptions = {row[4] for row in rows[1:]}
+        self.assertEqual(descriptions, {"Brake job", "Oil change"})
+
+    def test_technician_export_contains_only_their_own_records(self):
+        self.client.force_login(self.tech_a)
+        response = self.client.get(reverse("service-record-export"))
+        rows = self._rows(response)
+        descriptions = {row[4] for row in rows[1:]}
+        self.assertEqual(descriptions, {"Brake job"})
+
+    def test_export_respects_active_filters(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("service-record-export"), {"q": "brake"})
+        rows = self._rows(response)
+        descriptions = {row[4] for row in rows[1:]}
+        self.assertEqual(descriptions, {"Brake job"})

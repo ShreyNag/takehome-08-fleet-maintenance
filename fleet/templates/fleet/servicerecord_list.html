@@ -45,6 +45,8 @@
     <a href="{% url 'service-record-list' %}">Clear filters</a>
   </form>
 
+  <p><a href="{% url 'service-record-export' %}?{{ request.GET.urlencode }}">Export CSV</a></p>
+
   <p>{{ paginator.count }} matching record{{ paginator.count|pluralize }}.</p>
 
   <table>
