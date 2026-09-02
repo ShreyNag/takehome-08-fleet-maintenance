@@ -9,6 +9,8 @@
   <p>Description: {{ service_record.description }}</p>
   <p>Created by {{ service_record.created_by }} on {{ service_record.created_at|date:"Y-m-d H:i" }}</p>
 
+  <p><a href="{% url 'service-record-update' service_record.pk %}">Edit description</a></p>
+
   <h2>Timeline</h2>
   <!-- TimelineEvent writing is session 4 -- left as an empty placeholder
        rather than faked, per the brief. -->

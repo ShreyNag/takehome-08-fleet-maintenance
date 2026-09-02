@@ -184,3 +184,31 @@ class ServiceRecordDetailView(ManagerOrAssignedTechnicianMixin, DetailView):
     model = ServiceRecord
     template_name = "fleet/servicerecord_detail.html"
     context_object_name = "service_record"
+
+
+class ServiceRecordUpdateView(ManagerOrAssignedTechnicianMixin, UpdateView):
+    """Description only -- goal 3 is explicit that the assignee can update
+    the work description but not who is assigned. The form itself only
+    exposes description (ServiceRecordDescriptionForm), and permission is
+    identical to ServiceRecordDetailView (manager or assigned technician),
+    so anyone who can reach the record can also edit its description --
+    no separate template-level check needed on top of the shared mixin.
+    """
+
+    model = ServiceRecord
+    form_class = ServiceRecordDescriptionForm
+    template_name = "fleet/servicerecord_form.html"
+    context_object_name = "service_record"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["vehicle"] = self.object.vehicle
+        return context
+
+    def get_success_url(self):
+        return reverse("service-record-detail", kwargs={"pk": self.object.pk})
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, "Description updated.")
+        return response

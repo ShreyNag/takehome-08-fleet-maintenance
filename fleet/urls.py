@@ -16,4 +16,5 @@ urlpatterns = [
         name="service-record-create",
     ),
     path("service-records/<int:pk>/", views.ServiceRecordDetailView.as_view(), name="service-record-detail"),
+    path("service-records/<int:pk>/edit/", views.ServiceRecordUpdateView.as_view(), name="service-record-update"),
 ]
