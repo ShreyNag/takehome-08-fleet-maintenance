@@ -40,8 +40,11 @@ class Vehicle(models.Model):
     service_interval_days = models.PositiveIntegerField()
     service_interval_km = models.PositiveIntegerField()
 
-    next_due_date = models.DateField(null=True, db_index=True)
-    next_due_odometer = models.PositiveIntegerField(null=True, db_index=True)
+    # blank=True alongside null=True: `blank` (not `null`) is what
+    # full_clean()/ModelForm validation checks, so null=True alone still
+    # left these "required" from a validation standpoint.
+    next_due_date = models.DateField(null=True, blank=True, db_index=True)
+    next_due_odometer = models.PositiveIntegerField(null=True, blank=True, db_index=True)
 
     is_archived = models.BooleanField(default=False, db_index=True)
 
@@ -84,10 +87,10 @@ class ServiceRecord(models.Model):
     # where the grace period constant lives) — never store an is_overdue
     # flag, since that would just be next_due_date recomputed a second way
     # and could drift out of sync with it.
-    due_since = models.DateTimeField(null=True)
-    scheduled_date = models.DateField(null=True)
-    completed_at = models.DateTimeField(null=True)
-    completed_odometer = models.PositiveIntegerField(null=True)
+    due_since = models.DateTimeField(null=True, blank=True)
+    scheduled_date = models.DateField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    completed_odometer = models.PositiveIntegerField(null=True, blank=True)
 
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+"
@@ -185,7 +188,7 @@ class TimelineEvent(models.Model):
     # null = system-generated (e.g. an automated status change), not tied
     # to a human actor.
     actor = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, related_name="+"
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     old_value = models.CharField(max_length=255, blank=True)
     new_value = models.CharField(max_length=255, blank=True)
