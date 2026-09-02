@@ -43,3 +43,32 @@ class TechnicianScopedQuerysetMixin:
         if user.is_technician:
             return queryset.filter(technicians=user)
         return queryset
+
+
+class ManagerOrAssignedTechnicianMixin(LoginRequiredMixin):
+    """Object-level companion to TechnicianScopedQuerysetMixin, for
+    DetailView/UpdateView rather than ListView.
+
+    TechnicianScopedQuerysetMixin filters get_queryset() -- right for a
+    list (a technician just sees fewer rows), wrong here:
+    DetailView/UpdateView build get_object() from
+    get_queryset().get(pk=...), so a filtered-out row would surface as a
+    plain Http404, not a permission error. Goal 3 wants a technician who
+    tries a record they're not assigned to to be refused with a real 403,
+    not told the record doesn't exist. So this fetches the object from the
+    FULL queryset (existence is checked normally) and then explicitly
+    denies access on it, instead of filtering it out beforehand.
+
+    Same `technicians` field-name convention as TechnicianScopedQuerysetMixin
+    -- assumes the object being fetched exposes a `technicians` M2M to the
+    user model.
+    """
+
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset)
+        user = self.request.user
+        if user.is_fleet_manager:
+            return obj
+        if user.is_technician and obj.technicians.filter(pk=user.pk).exists():
+            return obj
+        raise PermissionDenied

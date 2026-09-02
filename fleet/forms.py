@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import Vehicle
+from .models import ServiceRecord, Vehicle
 
 
 class VehicleForm(forms.ModelForm):
@@ -20,3 +20,16 @@ class VehicleForm(forms.ModelForm):
             "service_interval_days",
             "service_interval_km",
         ]
+
+
+class ServiceRecordDescriptionForm(forms.ModelForm):
+    class Meta:
+        model = ServiceRecord
+        # Only field either role is allowed to touch through a form. status,
+        # due_since, scheduled_date, completed_at, completed_odometer and
+        # technicians are all lifecycle/assignment fields owned by later
+        # sessions -- deliberately absent, not merely hidden in the
+        # template. Used for both create (view sets vehicle/status/
+        # due_since/created_by in form_valid) and edit (description-only
+        # change, goal 3).
+        fields = ["description"]

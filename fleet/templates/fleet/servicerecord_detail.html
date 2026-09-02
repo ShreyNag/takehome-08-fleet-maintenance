@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Service record — FleetCare{% endblock %}
+
+{% block content %}
+  <h1>Service record</h1>
+  <p>Vehicle: <a href="{% url 'vehicle-detail' service_record.vehicle.pk %}">{{ service_record.vehicle }}</a></p>
+  <p>Status: {{ service_record.get_status_display }}</p>
+  <p>Description: {{ service_record.description }}</p>
+  <p>Created by {{ service_record.created_by }} on {{ service_record.created_at|date:"Y-m-d H:i" }}</p>
+
+  <h2>Timeline</h2>
+  <!-- TimelineEvent writing is session 4 -- left as an empty placeholder
+       rather than faked, per the brief. -->
+  <p><em>Coming in session 4.</em></p>
+{% endblock %}

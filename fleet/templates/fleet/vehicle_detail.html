@@ -21,6 +21,7 @@
           {% csrf_token %}
           <button type="submit" class="btn-link">Archive</button>
         </form>
+        <a href="{% url 'service-record-create' vehicle.pk %}">New service record</a>
       {% endif %}
     </p>
   {% endif %}
@@ -33,7 +34,7 @@
     <tbody>
       {% for record in service_records %}
         <tr>
-          <td>{{ record.created_at|date:"Y-m-d" }}</td>
+          <td><a href="{% url 'service-record-detail' record.pk %}">{{ record.created_at|date:"Y-m-d" }}</a></td>
           <td>{{ record.get_status_display }}</td>
           <td>{{ record.description|truncatewords:12 }}</td>
         </tr>

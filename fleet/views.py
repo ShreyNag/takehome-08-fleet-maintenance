@@ -2,12 +2,13 @@ from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
-from accounts.mixins import FleetManagerRequiredMixin
-from .forms import VehicleForm
-from .models import Vehicle
+from accounts.mixins import FleetManagerRequiredMixin, ManagerOrAssignedTechnicianMixin
+from .forms import ServiceRecordDescriptionForm, VehicleForm
+from .models import ServiceRecord, Vehicle
 
 
 class VehicleListView(LoginRequiredMixin, ListView):
@@ -132,3 +133,54 @@ class ArchivedVehicleListView(FleetManagerRequiredMixin, ListView):
 
     def get_queryset(self):
         return Vehicle.all_objects.filter(is_archived=True)
+
+
+class ServiceRecordCreateView(FleetManagerRequiredMixin, CreateView):
+    """Created against a vehicle taken from the URL, not a dropdown the
+    user could tamper with to point a new record at a different vehicle.
+
+    Vehicle looked up via the default (active-only) manager: an archived
+    vehicle keeps the service records it already has (goal 2), but this
+    form is how NEW records get created, and creating fresh work against
+    an archived vehicle isn't a described use case -- it 404s here until
+    the vehicle is restored.
+    """
+
+    model = ServiceRecord
+    form_class = ServiceRecordDescriptionForm
+    template_name = "fleet/servicerecord_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.vehicle = get_object_or_404(Vehicle, pk=kwargs["vehicle_pk"])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["vehicle"] = self.vehicle
+        return context
+
+    def form_valid(self, form):
+        # Lifecycle fields the form doesn't expose -- set here, not on the
+        # form, so neither role can submit them. Session 4 owns everything
+        # past this initial DUE state.
+        form.instance.vehicle = self.vehicle
+        form.instance.status = ServiceRecord.Status.DUE
+        form.instance.due_since = timezone.now()
+        form.instance.created_by = self.request.user
+        response = super().form_valid(form)
+        messages.success(self.request, "Service record created.")
+        return response
+
+    def get_success_url(self):
+        return reverse("service-record-detail", kwargs={"pk": self.object.pk})
+
+
+class ServiceRecordDetailView(ManagerOrAssignedTechnicianMixin, DetailView):
+    """Visible to managers, and to technicians only if assigned --
+    enforced by ManagerOrAssignedTechnicianMixin.get_object(), which 403s
+    rather than 404s an unassigned technician (see accounts/mixins.py for
+    why TechnicianScopedQuerysetMixin doesn't fit this)."""
+
+    model = ServiceRecord
+    template_name = "fleet/servicerecord_detail.html"
+    context_object_name = "service_record"
