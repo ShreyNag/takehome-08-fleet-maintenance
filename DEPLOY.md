@@ -32,14 +32,12 @@ Without the blueprint, create the web service by hand with these settings:
 
 ## 3. First deploy
 
-`build.sh` runs migrations automatically on every deploy. After the first successful deploy, run
-the `seed_users` management command (Render dashboard → Shell) to create demo login credentials:
+`build.sh` runs migrations and seeds the demo accounts automatically on every deploy (`seed_users`
+uses `get_or_create`, so re-running it on later deploys is a no-op for existing accounts). Check
+the build logs for the `Created ...` lines, or open the Render dashboard → Shell and run
+`python manage.py seed_users` again to print them.
 
-```
-python manage.py seed_users
-```
-
-Record the emails/passwords it prints in `SUBMISSION.md`.
+Record the emails/passwords in `SUBMISSION.md`.
 
 ## Free-tier note
 
