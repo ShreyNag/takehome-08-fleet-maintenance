@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'accounts',
+    'fleet',
 ]
 
 # Must be set before the first migrate; Django has no supported way to swap
