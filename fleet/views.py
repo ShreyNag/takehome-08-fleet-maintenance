@@ -14,7 +14,7 @@ from accounts.mixins import (
     VehicleTechnicianScopedQuerysetMixin,
 )
 from accounts.models import User
-from .filters import scoped_service_records
+from .filters import SORT_FIELDS, filtered_service_records
 from .forms import (
     AssignTechnicianForm,
     BookServiceForm,
@@ -448,26 +448,68 @@ class ServiceRecordAssignTechnicianView(FleetManagerRequiredMixin, SingleObjectM
 
 
 class ServiceRecordListView(LoginRequiredMixin, ListView):
-    """Every service record the viewer can see, across every vehicle --
-    and goal 5's technician landing page IS this view, not a separate one:
-    scoping comes from fleet.filters.scoped_service_records (same rule
-    TechnicianScopedQuerysetMixin encodes elsewhere), which restricts a
-    technician to their own records with no extra parameter needed, so
-    pointing the login redirect at this URL is sufficient on its own.
+    """Goal 6: every service record across every vehicle the viewer can
+    see -- and goal 5's technician landing page IS this view, not a
+    separate one: scoping comes from fleet.filters.scoped_service_records
+    (same rule TechnicianScopedQuerysetMixin encodes elsewhere), which
+    restricts a technician to their own records with no extra parameter
+    needed, so pointing the login redirect at this URL is sufficient on
+    its own.
 
-    Scoping lives in fleet.filters rather than here so ServiceRecordExport
-    View (goal 7, not a ListView) can reuse the exact same rule. Search,
-    filters, sorting and pagination land in the next commit (goal 6) --
-    this is deliberately just the scoped list goal 5 needs as a landing
-    page.
+    Scoping/filtering/sorting all live in fleet.filters rather than here so
+    ServiceRecordExportView (goal 7, not a ListView and so unable to reuse
+    get_queryset()) can call the exact same function and never show
+    different rows than whatever page it was exported from.
     """
 
     model = ServiceRecord
     template_name = "fleet/servicerecord_list.html"
     context_object_name = "service_records"
+    paginate_by = 20
 
     def get_queryset(self):
-        return scoped_service_records(self.request.user).order_by("scheduled_date", "pk")
+        # Cached on self rather than recomputed in get_context_data: the
+        # sort-was-valid flag has to survive from here (where it's known)
+        # to there (where the message gets surfaced), and ListView only
+        # calls get_queryset() once per request.
+        queryset, self.sort_was_valid = filtered_service_records(self.request.user, self.request.GET)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        if not self.sort_was_valid:
+            # Goal 6's correction: an unrecognised sort parameter falls
+            # back to the default rather than 500ing or being passed to
+            # order_by() unsanitised, but that fallback isn't silent --
+            # goal 4's illegal-transition messages set the precedent that
+            # a rejected input says so, in a message a user actually sees.
+            messages.warning(
+                self.request,
+                "Unrecognised sort — showing results in the default order instead.",
+            )
+
+        querystring = self.request.GET.copy()
+        querystring.pop("page", None)
+        context["querystring"] = querystring.urlencode()
+
+        # Sort-header links: one (asc, desc) pair per allowed field, each
+        # carrying every OTHER current filter/search param forward and
+        # resetting to page 1 -- built here rather than with template
+        # logic because QueryDict manipulation reads far worse in a
+        # template than three lines of Python.
+        sort_links = {}
+        for field in SORT_FIELDS:
+            for direction in ("asc", "desc"):
+                link_params = querystring.copy()
+                link_params["sort"] = field
+                link_params["dir"] = direction
+                sort_links[f"{field}_{direction}"] = link_params.urlencode()
+        context["sort_links"] = sort_links
+
+        context["vehicles"] = Vehicle.all_objects.order_by("registration_number")
+        context["technicians"] = User.objects.filter(role=User.Role.TECHNICIAN)
+        context["statuses"] = ServiceRecord.Status.choices
+        return context
 
 
 class ServiceRecordUnassignTechnicianView(FleetManagerRequiredMixin, SingleObjectMixin, View):

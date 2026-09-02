@@ -5,15 +5,69 @@
 {% block content %}
   <h1>Service records</h1>
 
+  <form method="get">
+    <p>
+      <label for="id_q">Search description</label>
+      <input type="text" id="id_q" name="q" value="{{ request.GET.q }}">
+    </p>
+    <p>
+      <label for="id_vehicle">Vehicle</label>
+      <select id="id_vehicle" name="vehicle">
+        <option value="">All vehicles</option>
+        {% for vehicle in vehicles %}
+          <option value="{{ vehicle.pk }}" {% if request.GET.vehicle == vehicle.pk|stringformat:"s" %}selected{% endif %}>
+            {{ vehicle.registration_number }}
+          </option>
+        {% endfor %}
+      </select>
+    </p>
+    <p>
+      <label for="id_status">Status</label>
+      <select id="id_status" name="status">
+        <option value="">All statuses</option>
+        {% for value, label in statuses %}
+          <option value="{{ value }}" {% if request.GET.status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </p>
+    <p>
+      <label for="id_technician">Technician</label>
+      <select id="id_technician" name="technician">
+        <option value="">All technicians</option>
+        {% for technician in technicians %}
+          <option value="{{ technician.pk }}" {% if request.GET.technician == technician.pk|stringformat:"s" %}selected{% endif %}>
+            {{ technician }}
+          </option>
+        {% endfor %}
+      </select>
+    </p>
+    <button type="submit">Filter</button>
+    <a href="{% url 'service-record-list' %}">Clear filters</a>
+  </form>
+
+  <p>{{ paginator.count }} matching record{{ paginator.count|pluralize }}.</p>
+
   <table>
     <thead>
       <tr>
         <th>Vehicle</th>
         <th>Description</th>
-        <th>Status</th>
-        <th>Scheduled date</th>
+        <th>
+          Status
+          <a href="?{{ sort_links.status_asc }}">&uarr;</a>
+          <a href="?{{ sort_links.status_desc }}">&darr;</a>
+        </th>
+        <th>
+          Scheduled date
+          <a href="?{{ sort_links.scheduled_date_asc }}">&uarr;</a>
+          <a href="?{{ sort_links.scheduled_date_desc }}">&darr;</a>
+        </th>
         <th>Technicians</th>
-        <th>Last update</th>
+        <th>
+          Last update
+          <a href="?{{ sort_links.updated_at_asc }}">&uarr;</a>
+          <a href="?{{ sort_links.updated_at_desc }}">&darr;</a>
+        </th>
       </tr>
     </thead>
     <tbody>
@@ -38,4 +92,16 @@
       {% endfor %}
     </tbody>
   </table>
+
+  {% if is_paginated %}
+    <p>
+      Page {{ page_obj.number }} of {{ paginator.num_pages }} ({{ paginator.count }} total)
+      {% if page_obj.has_previous %}
+        <a href="?{{ querystring }}{% if querystring %}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+      {% endif %}
+      {% if page_obj.has_next %}
+        <a href="?{{ querystring }}{% if querystring %}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+      {% endif %}
+    </p>
+  {% endif %}
 {% endblock %}

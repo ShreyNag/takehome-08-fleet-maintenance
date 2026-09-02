@@ -1025,10 +1025,10 @@ class TechnicianAssignedViaBookingVisibilityTests(TestCase):
 
 
 class ServiceRecordListViewTests(TestCase):
-    """Goal 5's technician landing page: one scoped list across every
-    vehicle. Search/filter/sort/pagination land in the next commit (goal
-    6) on this same view -- this covers only the role-scoping this view
-    needs to work as a landing page."""
+    """Goal 6: search, filters (combined), sanitised sort in both
+    directions, role scoping, pagination with a correct total count that
+    survives onto later pages, and no N+1. Goal 5's technician landing page
+    reuses this same view/URL -- covered here too rather than duplicated."""
 
     def setUp(self):
         self.manager = make_user("list-mgr@example.com", User.Role.FLEET_MANAGER)
@@ -1079,3 +1079,90 @@ class ServiceRecordListViewTests(TestCase):
         self.client.force_login(self.tech_a)
         response = self._get()
         self.assertEqual(set(response.context["service_records"]), {self.record_1, self.record_2})
+
+    def test_search_matches_description(self):
+        self.client.force_login(self.manager)
+        response = self._get(q="brake")
+        self.assertEqual(list(response.context["service_records"]), [self.record_1])
+
+    def test_filter_by_vehicle(self):
+        self.client.force_login(self.manager)
+        response = self._get(vehicle=self.vehicle_2.pk)
+        self.assertEqual(list(response.context["service_records"]), [self.record_2])
+
+    def test_filter_by_status(self):
+        self.client.force_login(self.manager)
+        response = self._get(status=ServiceRecord.Status.DUE)
+        self.assertEqual(list(response.context["service_records"]), [self.record_1])
+
+    def test_filter_by_technician(self):
+        self.client.force_login(self.manager)
+        response = self._get(technician=self.tech_b.pk)
+        self.assertEqual(list(response.context["service_records"]), [self.record_2])
+
+    def test_filters_combine(self):
+        self.client.force_login(self.manager)
+        response = self._get(vehicle=self.vehicle_1.pk, status=ServiceRecord.Status.BOOKED)
+        self.assertEqual(list(response.context["service_records"]), [self.record_3])
+
+    def test_sort_by_scheduled_date_both_directions(self):
+        self.client.force_login(self.manager)
+        response = self._get(status=ServiceRecord.Status.BOOKED, sort="scheduled_date", dir="asc")
+        self.assertEqual(list(response.context["service_records"]), [self.record_3, self.record_2])
+
+        response = self._get(status=ServiceRecord.Status.BOOKED, sort="scheduled_date", dir="desc")
+        self.assertEqual(list(response.context["service_records"]), [self.record_2, self.record_3])
+
+    def test_sort_by_updated_at_both_directions(self):
+        ServiceRecord.objects.filter(pk=self.record_1.pk).update(updated_at=timezone.now() - timedelta(days=5))
+        ServiceRecord.objects.filter(pk=self.record_2.pk).update(updated_at=timezone.now() - timedelta(days=1))
+        ServiceRecord.objects.filter(pk=self.record_3.pk).update(updated_at=timezone.now() - timedelta(days=10))
+
+        self.client.force_login(self.manager)
+        response = self._get(sort="updated_at", dir="asc")
+        self.assertEqual(list(response.context["service_records"]), [self.record_3, self.record_1, self.record_2])
+
+        response = self._get(sort="updated_at", dir="desc")
+        self.assertEqual(list(response.context["service_records"]), [self.record_2, self.record_1, self.record_3])
+
+    def test_invalid_sort_falls_back_and_surfaces_a_message(self):
+        self.client.force_login(self.manager)
+        response = self._get(sort="vehicle__owner__password")
+        self.assertEqual(response.status_code, 200)
+        messages_text = [str(m) for m in response.context["messages"]]
+        self.assertTrue(any("sort" in m.lower() for m in messages_text))
+        # Falls back to the default order rather than erroring or being
+        # passed through to order_by() unsanitised.
+        self.assertEqual(set(response.context["service_records"]), {self.record_1, self.record_2, self.record_3})
+
+    def test_pagination_total_count_is_correct_with_filters_applied(self):
+        for i in range(30):
+            make_record(self.vehicle_1, self.manager, status=ServiceRecord.Status.DUE, description=f"Filler {i}")
+        self.client.force_login(self.manager)
+        response = self._get(status=ServiceRecord.Status.DUE)
+        # 30 filler records + record_1, all DUE -- record_2 and record_3 are
+        # BOOKED and must not be counted.
+        self.assertEqual(response.context["paginator"].count, 31)
+
+    def test_filter_state_survives_pagination(self):
+        for i in range(30):
+            make_record(self.vehicle_1, self.manager, status=ServiceRecord.Status.DUE, description=f"Brake job {i}")
+        self.client.force_login(self.manager)
+        response = self._get(status=ServiceRecord.Status.DUE, page=2)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["page_obj"].number, 2)
+        for record in response.context["service_records"]:
+            self.assertEqual(record.status, ServiceRecord.Status.DUE)
+        self.assertIn("status=", response.context["querystring"])
+
+    def test_query_count_does_not_grow_with_result_count(self):
+        self.client.force_login(self.manager)
+        with self.assertNumQueries(7):
+            self._get()
+
+        for i in range(15):
+            extra = make_record(self.vehicle_2, self.manager, status=ServiceRecord.Status.DUE, description=f"Extra {i}")
+            ServiceAssignment.objects.create(service_record=extra, technician=self.tech_a, assigned_by=self.manager)
+
+        with self.assertNumQueries(7):
+            self._get()
