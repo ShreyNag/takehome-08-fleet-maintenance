@@ -492,7 +492,11 @@ class TransitionTimelineTests(TestCase):
         before = self._event_count()
         book_service(self.record, scheduled_date=date.today(), technician=self.technician, actor=self.manager)
         self.assertEqual(self._event_count() - before, 1)
-        event = TimelineEvent.objects.filter(service_record=self.record).latest("created_at")
+        # latest("pk"), not "created_at": these tests fire two transitions
+        # back-to-back with no delay, and auto_now_add's clock resolution
+        # isn't always fine enough to guarantee a strict ordering between
+        # them -- pk insertion order is.
+        event = TimelineEvent.objects.filter(service_record=self.record).latest("pk")
         self.assertEqual(event.event_type, TimelineEvent.EventType.STATUS_CHANGED)
         self.assertEqual(event.actor, self.manager)
         self.assertEqual(event.old_value, ServiceRecord.Status.DUE)
@@ -503,7 +507,7 @@ class TransitionTimelineTests(TestCase):
         before = self._event_count()
         start_service(self.record, actor=self.technician)
         self.assertEqual(self._event_count() - before, 1)
-        event = TimelineEvent.objects.filter(service_record=self.record).latest("created_at")
+        event = TimelineEvent.objects.filter(service_record=self.record).latest("pk")
         self.assertEqual(event.actor, self.technician)
         self.assertEqual(event.old_value, ServiceRecord.Status.BOOKED)
         self.assertEqual(event.new_value, ServiceRecord.Status.IN_SERVICE)
@@ -514,7 +518,7 @@ class TransitionTimelineTests(TestCase):
         before = self._event_count()
         complete_service(self.record, completed_odometer=self.vehicle.current_odometer + 500, actor=self.technician)
         self.assertEqual(self._event_count() - before, 1)
-        event = TimelineEvent.objects.filter(service_record=self.record).latest("created_at")
+        event = TimelineEvent.objects.filter(service_record=self.record).latest("pk")
         self.assertEqual(event.actor, self.technician)
         self.assertEqual(event.old_value, ServiceRecord.Status.IN_SERVICE)
         self.assertEqual(event.new_value, ServiceRecord.Status.COMPLETED)
