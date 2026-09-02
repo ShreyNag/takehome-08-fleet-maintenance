@@ -21,6 +21,30 @@
 
   <p><a href="{% url 'service-record-update' service_record.pk %}">Edit description</a></p>
 
+  <h2>Technicians</h2>
+  <ul>
+    {% for technician in technicians %}
+      <li>
+        {{ technician }}
+        {% if assign_technician_form %}
+          <form method="post" action="{% url 'service-record-unassign' service_record.pk technician.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn-link">Remove</button>
+          </form>
+        {% endif %}
+      </li>
+    {% empty %}
+      <li>No technicians assigned yet.</li>
+    {% endfor %}
+  </ul>
+  {% if assign_technician_form %}
+    <form method="post" action="{% url 'service-record-assign' service_record.pk %}">
+      {% csrf_token %}
+      {{ assign_technician_form.as_p }}
+      <button type="submit">Add technician</button>
+    </form>
+  {% endif %}
+
   <h2>Actions</h2>
   {% if show_book_form %}
     <form method="post" action="{% url 'service-record-book' service_record.pk %}">

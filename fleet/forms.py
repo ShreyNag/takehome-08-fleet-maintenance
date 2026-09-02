@@ -55,6 +55,17 @@ class CompleteServiceForm(forms.Form):
     completed_odometer = forms.IntegerField(min_value=0, label="Odometer reading (km)")
 
 
+class AssignTechnicianForm(forms.Form):
+    """Goal 5's add-technician form on the record detail page. Manager-only
+    at the view layer (FleetManagerRequiredMixin) -- this form doesn't
+    enforce that itself, same division of labour as BookServiceForm."""
+
+    technician = forms.ModelChoiceField(
+        queryset=User.objects.filter(role=User.Role.TECHNICIAN),
+        label="Add technician",
+    )
+
+
 class TimelineNoteForm(forms.Form):
     """NOTE_ADDED timeline events -- open to managers and the assigned
     technician, same permission as viewing the record at all."""

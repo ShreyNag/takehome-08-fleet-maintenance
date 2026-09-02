@@ -29,4 +29,14 @@ urlpatterns = [
         views.ServiceRecordAddNoteView.as_view(),
         name="service-record-add-note",
     ),
+    path(
+        "service-records/<int:pk>/assign/",
+        views.ServiceRecordAssignTechnicianView.as_view(),
+        name="service-record-assign",
+    ),
+    path(
+        "service-records/<int:pk>/unassign/<int:technician_pk>/",
+        views.ServiceRecordUnassignTechnicianView.as_view(),
+        name="service-record-unassign",
+    ),
 ]

@@ -13,7 +13,9 @@ from accounts.mixins import (
     VehicleManagerOrAssignedTechnicianMixin,
     VehicleTechnicianScopedQuerysetMixin,
 )
+from accounts.models import User
 from .forms import (
+    AssignTechnicianForm,
     BookServiceForm,
     CompleteServiceForm,
     ServiceRecordDescriptionForm,
@@ -25,10 +27,12 @@ from .services import (
     ALLOWED_TRANSITIONS,
     InvalidTransitionInput,
     ServiceLifecycleError,
+    assign_technician,
     book_service,
     complete_service,
     ensure_due_record,
     start_service,
+    unassign_technician,
 )
 
 
@@ -256,6 +260,7 @@ class ServiceRecordDetailContextMixin:
             "service_record": service_record,
             "timeline": service_record.timeline.select_related("actor"),
             "note_form": TimelineNoteForm(),
+            "technicians": service_record.technicians.all(),
             "show_book_form": ServiceRecord.Status.BOOKED in allowed,
             "show_start_button": ServiceRecord.Status.IN_SERVICE in allowed,
             "show_complete_form": ServiceRecord.Status.COMPLETED in allowed,
@@ -264,6 +269,13 @@ class ServiceRecordDetailContextMixin:
             context["book_form"] = BookServiceForm()
         if context["show_complete_form"]:
             context["complete_form"] = CompleteServiceForm()
+        # Assignment (goal 5) is manager-only, including for a technician
+        # already on the record -- the form (and the remove buttons the
+        # template renders alongside `technicians` above) only appears for
+        # a manager, same permission FleetManagerRequiredMixin enforces
+        # server-side on the two views below.
+        if self.request.user.is_fleet_manager:
+            context["assign_technician_form"] = AssignTechnicianForm()
         return context
 
 
@@ -406,4 +418,47 @@ class ServiceRecordAddNoteView(ManagerOrAssignedTechnicianMixin, SingleObjectMix
             messages.success(request, "Note added.")
         else:
             messages.error(request, "Note cannot be empty.")
+        return redirect("service-record-detail", pk=self.object.pk)
+
+
+class ServiceRecordAssignTechnicianView(FleetManagerRequiredMixin, SingleObjectMixin, View):
+    """Goal 5: manager-only, deliberately FleetManagerRequiredMixin rather
+    than ManagerOrAssignedTechnicianMixin -- a technician already assigned
+    to this record still gets 403 here, unlike the view/edit/note actions
+    above which that other mixin allows them into."""
+
+    model = ServiceRecord
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = AssignTechnicianForm(request.POST)
+        if not form.is_valid():
+            messages.error(request, "Select a valid technician.")
+            return redirect("service-record-detail", pk=self.object.pk)
+        assignment, created = assign_technician(
+            self.object, form.cleaned_data["technician"], actor=request.user
+        )
+        if created:
+            messages.success(request, f"{assignment.technician} assigned.")
+        else:
+            messages.info(request, f"{assignment.technician} is already assigned.")
+        return redirect("service-record-detail", pk=self.object.pk)
+
+
+class ServiceRecordUnassignTechnicianView(FleetManagerRequiredMixin, SingleObjectMixin, View):
+    """Goal 5's inverse. technician_pk comes from the URL, not a form field
+    -- each remove button in the template posts straight to a specific
+    technician's own unassign URL."""
+
+    model = ServiceRecord
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        technician = get_object_or_404(User, pk=kwargs["technician_pk"])
+        if unassign_technician(self.object, technician, actor=request.user):
+            messages.success(request, f"{technician} removed.")
+        else:
+            messages.info(request, f"{technician} was not assigned.")
         return redirect("service-record-detail", pk=self.object.pk)

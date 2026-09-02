@@ -17,10 +17,12 @@ from fleet.services import (
     InvalidTransition,
     InvalidTransitionInput,
     _check_transition,
+    assign_technician,
     book_service,
     complete_service,
     ensure_due_record,
     start_service,
+    unassign_technician,
 )
 
 
@@ -488,19 +490,27 @@ class TransitionTimelineTests(TestCase):
     def _event_count(self):
         return TimelineEvent.objects.filter(service_record=self.record).count()
 
-    def test_book_service_writes_exactly_one_event(self):
+    def test_book_service_writes_a_status_and_an_assignment_event(self):
+        # Booking assigns a technician (goal 4) AND is a first-class
+        # assignment (goal 5) -- goal 9 wants every technician assignment
+        # on the timeline, so this is two events, not one: the assignment
+        # itself, and the status change. (Previously this test asserted
+        # exactly one event, from before assignment was a first-class
+        # action with its own audit event -- see docs/decisions.md.)
         before = self._event_count()
         book_service(self.record, scheduled_date=date.today(), technician=self.technician, actor=self.manager)
-        self.assertEqual(self._event_count() - before, 1)
-        # latest("pk"), not "created_at": these tests fire two transitions
-        # back-to-back with no delay, and auto_now_add's clock resolution
-        # isn't always fine enough to guarantee a strict ordering between
-        # them -- pk insertion order is.
-        event = TimelineEvent.objects.filter(service_record=self.record).latest("pk")
-        self.assertEqual(event.event_type, TimelineEvent.EventType.STATUS_CHANGED)
-        self.assertEqual(event.actor, self.manager)
-        self.assertEqual(event.old_value, ServiceRecord.Status.DUE)
-        self.assertEqual(event.new_value, ServiceRecord.Status.BOOKED)
+        self.assertEqual(self._event_count() - before, 2)
+        events = list(TimelineEvent.objects.filter(service_record=self.record).order_by("pk"))
+        assigned_event, status_event = events[-2], events[-1]
+
+        self.assertEqual(assigned_event.event_type, TimelineEvent.EventType.TECHNICIAN_ASSIGNED)
+        self.assertEqual(assigned_event.actor, self.manager)
+        self.assertEqual(assigned_event.new_value, str(self.technician))
+
+        self.assertEqual(status_event.event_type, TimelineEvent.EventType.STATUS_CHANGED)
+        self.assertEqual(status_event.actor, self.manager)
+        self.assertEqual(status_event.old_value, ServiceRecord.Status.DUE)
+        self.assertEqual(status_event.new_value, ServiceRecord.Status.BOOKED)
 
     def test_start_service_writes_exactly_one_event(self):
         book_service(self.record, scheduled_date=date.today(), technician=self.technician, actor=self.manager)
@@ -535,6 +545,139 @@ class TransitionTimelineTests(TestCase):
         self.assertEqual(self.record.status, ServiceRecord.Status.DUE)
         self.assertIsNone(self.record.scheduled_date)
         self.assertFalse(ServiceAssignment.objects.filter(service_record=self.record).exists())
+
+
+class AssignTechnicianServiceTests(TestCase):
+    """Goal 5, service layer: assign_technician / unassign_technician are
+    idempotent and write exactly one timeline event per actual change."""
+
+    def setUp(self):
+        self.manager = make_user("assign-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.technician = make_user("assign-tech@example.com", User.Role.TECHNICIAN)
+        self.vehicle = make_vehicle(registration_number="ASSIGN-1")
+        self.record = make_record(self.vehicle, self.manager)
+
+    def _event_count(self):
+        return TimelineEvent.objects.filter(service_record=self.record).count()
+
+    def test_assign_creates_row_and_one_event(self):
+        before = self._event_count()
+        assignment, created = assign_technician(self.record, self.technician, actor=self.manager)
+        self.assertTrue(created)
+        self.assertEqual(assignment.technician, self.technician)
+        self.assertEqual(assignment.assigned_by, self.manager)
+        self.assertEqual(self._event_count() - before, 1)
+        event = TimelineEvent.objects.filter(service_record=self.record).latest("pk")
+        self.assertEqual(event.event_type, TimelineEvent.EventType.TECHNICIAN_ASSIGNED)
+        self.assertEqual(event.actor, self.manager)
+        self.assertEqual(event.new_value, str(self.technician))
+
+    def test_assigning_an_already_assigned_technician_is_a_no_op(self):
+        assign_technician(self.record, self.technician, actor=self.manager)
+        before = self._event_count()
+        before_count = ServiceAssignment.objects.filter(service_record=self.record).count()
+
+        assignment, created = assign_technician(self.record, self.technician, actor=self.manager)
+
+        self.assertFalse(created)
+        self.assertEqual(ServiceAssignment.objects.filter(service_record=self.record).count(), before_count)
+        self.assertEqual(self._event_count(), before)
+
+    def test_unassign_removes_row_and_writes_one_event(self):
+        assign_technician(self.record, self.technician, actor=self.manager)
+        before = self._event_count()
+
+        removed = unassign_technician(self.record, self.technician, actor=self.manager)
+
+        self.assertTrue(removed)
+        self.assertFalse(ServiceAssignment.objects.filter(service_record=self.record, technician=self.technician).exists())
+        self.assertEqual(self._event_count() - before, 1)
+        event = TimelineEvent.objects.filter(service_record=self.record).latest("pk")
+        self.assertEqual(event.event_type, TimelineEvent.EventType.TECHNICIAN_UNASSIGNED)
+        self.assertEqual(event.actor, self.manager)
+        self.assertEqual(event.old_value, str(self.technician))
+
+    def test_unassigning_a_technician_who_is_not_assigned_is_a_no_op(self):
+        before = self._event_count()
+        removed = unassign_technician(self.record, self.technician, actor=self.manager)
+        self.assertFalse(removed)
+        self.assertEqual(self._event_count(), before)
+
+
+class AssignTechnicianViewTests(TestCase):
+    """Goal 5, view layer: manager-only, including against a technician
+    already assigned to the record -- FleetManagerRequiredMixin, not the
+    manager-or-assignee mixin the rest of the detail page uses."""
+
+    def setUp(self):
+        self.manager = make_user("assignview-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.technician = make_user("assignview-tech@example.com", User.Role.TECHNICIAN)
+        self.other_technician = make_user("assignview-other@example.com", User.Role.TECHNICIAN)
+        self.vehicle = make_vehicle(registration_number="ASSIGNVIEW-1")
+        self.record = make_record(self.vehicle, self.manager)
+
+    def test_manager_can_assign(self):
+        self.client.force_login(self.manager)
+        response = self.client.post(
+            reverse("service-record-assign", args=[self.record.pk]),
+            {"technician": self.technician.pk},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            ServiceAssignment.objects.filter(service_record=self.record, technician=self.technician).exists()
+        )
+
+    def test_manager_can_unassign(self):
+        ServiceAssignment.objects.create(service_record=self.record, technician=self.technician, assigned_by=self.manager)
+        self.client.force_login(self.manager)
+        response = self.client.post(
+            reverse("service-record-unassign", args=[self.record.pk, self.technician.pk])
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(
+            ServiceAssignment.objects.filter(service_record=self.record, technician=self.technician).exists()
+        )
+
+    def test_technician_gets_403_on_assign(self):
+        self.client.force_login(self.technician)
+        response = self.client.post(
+            reverse("service-record-assign", args=[self.record.pk]),
+            {"technician": self.technician.pk},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_already_assigned_technician_still_gets_403_on_assign(self):
+        # Goal 5 is explicit: even a technician already on this record
+        # cannot add another -- assignment is manager-only, full stop.
+        ServiceAssignment.objects.create(service_record=self.record, technician=self.technician, assigned_by=self.manager)
+        self.client.force_login(self.technician)
+        response = self.client.post(
+            reverse("service-record-assign", args=[self.record.pk]),
+            {"technician": self.other_technician.pk},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(
+            ServiceAssignment.objects.filter(service_record=self.record, technician=self.other_technician).exists()
+        )
+
+    def test_technician_gets_403_on_unassign(self):
+        ServiceAssignment.objects.create(service_record=self.record, technician=self.technician, assigned_by=self.manager)
+        self.client.force_login(self.technician)
+        response = self.client.post(
+            reverse("service-record-unassign", args=[self.record.pk, self.technician.pk])
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(
+            ServiceAssignment.objects.filter(service_record=self.record, technician=self.technician).exists()
+        )
+
+    def test_already_assigned_technician_still_gets_403_on_unassign(self):
+        ServiceAssignment.objects.create(service_record=self.record, technician=self.technician, assigned_by=self.manager)
+        self.client.force_login(self.technician)
+        response = self.client.post(
+            reverse("service-record-unassign", args=[self.record.pk, self.technician.pk])
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class EnsureDueRecordTests(TestCase):
@@ -841,3 +984,41 @@ class VehicleServiceStatusAnnotationTests(TestCase):
             make_vehicle(registration_number=f"VSTATUS-N2-{i}")
         with self.assertNumQueries(3):
             self.client.get(reverse("vehicle-list"))
+
+
+class TechnicianAssignedViaBookingVisibilityTests(TestCase):
+    """Regression coverage from an earlier bug report: a technician
+    assigned via booking could not see the vehicle or the service record
+    afterward. Diagnosis found no bug in the code as it stood, but this
+    exact flow -- manager books a record with a technician, then that
+    technician requests both detail pages -- wasn't directly covered
+    anywhere, and this session reworks book_service's assignment path, so
+    it's worth locking in now."""
+
+    def setUp(self):
+        self.manager = make_user("bug-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.technician = make_user("bug-tech@example.com", User.Role.TECHNICIAN)
+        self.vehicle = make_vehicle(registration_number="BUG-1")
+        self.record = make_record(self.vehicle, self.manager, status=ServiceRecord.Status.DUE)
+        book_service(self.record, scheduled_date=date.today(), technician=self.technician, actor=self.manager)
+
+    def test_assignment_row_exists_with_assigned_by_set(self):
+        assignment = ServiceAssignment.objects.get(service_record=self.record, technician=self.technician)
+        self.assertEqual(assignment.assigned_by, self.manager)
+
+    def test_technician_can_view_vehicle_detail(self):
+        self.client.force_login(self.technician)
+        response = self.client.get(reverse("vehicle-detail", args=[self.vehicle.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(self.record, response.context["service_records"])
+
+    def test_technician_can_view_service_record_detail(self):
+        self.client.force_login(self.technician)
+        response = self.client.get(reverse("service-record-detail", args=[self.record.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["service_record"], self.record)
+
+    def test_technician_sees_the_vehicle_on_the_vehicle_list(self):
+        self.client.force_login(self.technician)
+        response = self.client.get(reverse("vehicle-list"))
+        self.assertIn(self.vehicle, response.context["vehicles"])

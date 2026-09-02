@@ -96,6 +96,56 @@ def _record_status_change(record, actor, old_status):
 # being left half-updated in memory even though the DB write rolled back.
 
 
+def assign_technician(record, technician, actor):
+    """Goal 5: add `technician` to `record`, at booking or at any point
+    after. Not a state transition (no status check, no ALLOWED_TRANSITIONS
+    involvement) -- any number of technicians can be on a record in any
+    status.
+
+    Idempotent by design: assigning someone already on the record must be a
+    no-op, not an IntegrityError off the (service_record, technician)
+    unique constraint and not a second timeline event for something that
+    didn't actually change. get_or_create + the `created` flag is what
+    makes both of those true in one round trip rather than a separate
+    existence check.
+
+    Permission (manager-only, even for a technician already assigned) is
+    the view layer's job, same convention as every other function here --
+    this function trusts its caller.
+    """
+    with transaction.atomic():
+        assignment, created = ServiceAssignment.objects.get_or_create(
+            service_record=record, technician=technician, defaults={"assigned_by": actor}
+        )
+        if created:
+            TimelineEvent.objects.create(
+                service_record=record,
+                event_type=TimelineEvent.EventType.TECHNICIAN_ASSIGNED,
+                actor=actor,
+                new_value=str(technician),
+            )
+    return assignment, created
+
+
+def unassign_technician(record, technician, actor):
+    """Goal 5's inverse. Symmetric no-op if `technician` isn't currently on
+    the record -- same reasoning as assign_technician: removing someone who
+    isn't there didn't change anything, so no event.
+    """
+    with transaction.atomic():
+        deleted, _ = ServiceAssignment.objects.filter(
+            service_record=record, technician=technician
+        ).delete()
+        if deleted:
+            TimelineEvent.objects.create(
+                service_record=record,
+                event_type=TimelineEvent.EventType.TECHNICIAN_UNASSIGNED,
+                actor=actor,
+                old_value=str(technician),
+            )
+    return bool(deleted)
+
+
 def book_service(record, scheduled_date, technician, actor):
     """DUE -> BOOKED.
 
@@ -113,21 +163,17 @@ def book_service(record, scheduled_date, technician, actor):
         record.status = ServiceRecord.Status.BOOKED
         record.scheduled_date = scheduled_date
         record.save(update_fields=["status", "scheduled_date", "updated_at"])
-        # The through-model row IS the assignment; no separate
-        # TECHNICIAN_ASSIGNED timeline event -- goal 4's tests require
-        # exactly one timeline event per transition call, and the
-        # ServiceAssignment row already records who and when.
-        #
-        # get_or_create, not create: ServiceAssignment isn't exclusively a
-        # booking artifact -- session 3's admin-only assignment path (and
-        # session 5's assignment UI) can assign a technician to a record
-        # before it's ever booked. Booking that same technician would
-        # otherwise hit the (service_record, technician) unique constraint;
-        # booking just needs the row to exist, not to be the one that
-        # created it.
-        ServiceAssignment.objects.get_or_create(
-            service_record=record, technician=technician, defaults={"assigned_by": actor}
-        )
+        # One code path for assignment (goal 5): booking a technician who's
+        # already on the record (assigned ahead of booking, e.g. via the
+        # goal-5 assignment UI) is just the no-op assign_technician already
+        # handles -- no separate get_or_create here. This does mean a
+        # booking call now writes TWO timeline events (TECHNICIAN_ASSIGNED
+        # + STATUS_CHANGED) rather than one: goal 9 wants "every technician
+        # assignment" on the timeline, and a booking that silently omitted
+        # its own assignment event would leave a reviewer unable to see when
+        # the technician actually came onto the record from the timeline
+        # alone.
+        assign_technician(record, technician, actor)
         _record_status_change(record, actor, old_status)
     return record
 
