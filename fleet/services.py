@@ -117,8 +117,16 @@ def book_service(record, scheduled_date, technician, actor):
         # TECHNICIAN_ASSIGNED timeline event -- goal 4's tests require
         # exactly one timeline event per transition call, and the
         # ServiceAssignment row already records who and when.
-        ServiceAssignment.objects.create(
-            service_record=record, technician=technician, assigned_by=actor
+        #
+        # get_or_create, not create: ServiceAssignment isn't exclusively a
+        # booking artifact -- session 3's admin-only assignment path (and
+        # session 5's assignment UI) can assign a technician to a record
+        # before it's ever booked. Booking that same technician would
+        # otherwise hit the (service_record, technician) unique constraint;
+        # booking just needs the row to exist, not to be the one that
+        # created it.
+        ServiceAssignment.objects.get_or_create(
+            service_record=record, technician=technician, defaults={"assigned_by": actor}
         )
         _record_status_change(record, actor, old_status)
     return record
