@@ -138,3 +138,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'login'
+
+
+# Fleet service lifecycle
+
+# A DUE record counts as overdue once it's been due longer than this many
+# days -- never stored (no is_overdue column), always derived at read time
+# from due_since. Env-configurable since "how much grace" is an operational
+# call, not a code constant.
+SERVICE_GRACE_PERIOD_DAYS = env.int('SERVICE_GRACE_PERIOD_DAYS', default=7)

@@ -1,6 +1,9 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 class TimelineImmutableError(Exception):
@@ -69,6 +72,18 @@ class Vehicle(models.Model):
         return self.registration_number
 
 
+class ServiceRecordQuerySet(models.QuerySet):
+    def overdue(self):
+        """Goals 8 and 10 need this filterable/countable in SQL, which is
+        why it exists here and not only as the is_overdue property below --
+        a Python property can't be filtered or aggregated. Same formula as
+        the property, so the two can never silently drift apart: due_since
+        + grace period in the past, i.e. due_since older than now - grace.
+        """
+        cutoff = timezone.now() - timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS)
+        return self.filter(status=ServiceRecord.Status.DUE, due_since__lt=cutoff)
+
+
 class ServiceRecord(models.Model):
     class Status(models.TextChoices):
         DUE = "DUE", "Due"
@@ -83,10 +98,10 @@ class ServiceRecord(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, db_index=True)
 
     # When the record entered DUE. Overdue is derived as
-    # `due_since + grace_period < now` at read time (session 4 decides
-    # where the grace period constant lives) — never store an is_overdue
-    # flag, since that would just be next_due_date recomputed a second way
-    # and could drift out of sync with it.
+    # `due_since + SERVICE_GRACE_PERIOD_DAYS < now` at read time (see
+    # is_overdue below and ServiceRecordQuerySet.overdue() above) — never
+    # store an is_overdue flag, since that would just be the same
+    # comparison recomputed a second way and could drift out of sync.
     due_since = models.DateTimeField(null=True, blank=True)
     scheduled_date = models.DateField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -111,6 +126,8 @@ class ServiceRecord(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ServiceRecordQuerySet.as_manager()
 
     class Meta:
         indexes = [
@@ -141,6 +158,18 @@ class ServiceRecord(models.Model):
             raise ValidationError(
                 "completed_at and completed_odometer must both be set or both left null."
             )
+
+    @property
+    def is_overdue(self):
+        """Template-friendly mirror of ServiceRecordQuerySet.overdue() --
+        same formula, spelled the other way (due_since + grace < now,
+        rather than due_since < now - grace) but mathematically identical,
+        so a record's overdue-ness reads the same whether it came from a
+        queryset or a single instance.
+        """
+        if self.status != self.Status.DUE or self.due_since is None:
+            return False
+        return self.due_since + timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS) < timezone.now()
 
 
 class ServiceAssignment(models.Model):
