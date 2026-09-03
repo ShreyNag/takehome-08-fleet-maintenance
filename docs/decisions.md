@@ -577,3 +577,104 @@ Idempotency is a registration-number prefix (`FC-DEMO-`), not a fixed set of pri
 assignments) before recreating the fleet, verified empirically that Django's deletion Collector for
 a CASCADE doesn't route through `TimelineEventQuerySet.delete()`'s override — that guard exists for
 the *application's* code paths, not a data-management script's cleanup of rows it owns outright.
+
+## 26. Overlapping dashboard counts, labelled rather than partitioned
+
+**Session 6.**
+
+**Chose:** The four headline numbers overlap. "Vehicles due" includes both
+"currently in service" and "overdue" as subsets, since In Service is an open
+state and an aged DUE record still has status DUE. Added a caption saying so.
+**Rejected:** Making them mutually exclusive.
+
+Goal 8 names these four numbers. Partitioning them would mean "due" silently
+excluding overdue vehicles, which reads worse — a manager scanning for what
+needs attention wants overdue vehicles counted among the due, not hidden from
+that number.
+
+But I misread my own dashboard, which is a reliable sign a reviewer would too.
+Rather than change the queries, the row now carries a caption stating that the
+counts overlap and that completed services counts records rather than
+vehicles.
+
+## 27. Living with the immutability rule
+
+**Session 6.**
+
+Goal 9's append-only timeline, enforced at the model level (decision #10), then
+blocked me. Clearing leftover test vehicles before seeding demo data meant
+cascading deletes through their service records into timeline events, which the
+model refuses — correctly, and in the admin as much as anywhere.
+
+Two ways out: delete via SQL, bypassing Django since the rule lives in Python
+rather than in a Postgres constraint; or archive the vehicles, which is the
+mechanism goal 2 provides for retiring one without destroying its history.
+
+Archived them. Reaching around a guarantee to tidy test data would have made
+the guarantee conditional, and the retirement path already existed for exactly
+this case.
+
+Worth being precise about what the rule does and does not promise: no code path
+in the application can rewrite history, including a superuser through the
+admin. An operator with direct SQL access still can. A database-level
+constraint would close that, and is the first thing I would add if this were
+production.
+
+## 28. Assignment stays at booking, with guidance instead
+
+**Session 6.**
+
+**Chose:** The service record create form takes a description only. Added
+helper text explaining that the record is created as Due and that booking is
+where a date and technician are set.
+**Rejected:** Adding a technician field to the create form.
+
+The create form reads as incomplete — I wondered myself where assignment had
+gone. But moving it earlier breaks the lifecycle: goal 4 places assignment at
+booking, and a record exists as Due precisely because nothing has been
+scheduled yet. That Due state is what the grace period, the overdue rule and
+goal 10's alerts are all built on.
+
+It also cannot apply to auto-generated records. When a threshold fires, the
+system creates a Due record with nobody available to pick a technician. Putting
+the field on the manual form would make the two creation paths behave
+differently, which is worse than either.
+
+Fixed the confusion with guidance rather than by moving the field.
+
+## 29. A protected endpoint instead of a scheduled command
+
+**Session 6.**
+
+**Chose:** A token-authenticated POST endpoint that runs the fleet-wide due
+check, called on a schedule by an external cron service.
+**Rejected:** A Render cron job (unavailable on the free tier), and accepting
+the gap.
+
+`ensure_due_record` fires on odometer update and service completion, which
+covers the mileage threshold fully. The date threshold never fires on its own,
+so a vehicle sitting untouched past its date interval was never flagged —
+leaving goal 4 half-met, and specifically the half the brief's opening scenario
+describes.
+
+The endpoint is a thin wrapper around the existing `check_due_vehicles`
+management command rather than a reimplementation, so the scheduling mechanism
+can be swapped for a real cron on a paid tier without touching the logic. The
+token comes from an environment variable; unset, the endpoint refuses
+everything.
+
+This is a workaround for a hosting constraint. I would rather have the gap
+closed with an ugly mechanism than left open with a note about it.
+
+## 30. CSS bars instead of a charting library
+
+**Session 6.**
+
+**Chose:** Goal 8's eight-week chart is a div per week, height scaled as a
+percentage of the maximum.
+**Rejected:** Chart.js from a CDN.
+
+Decision #17 committed to no JavaScript and no external dependencies. A
+charting library for one bar chart would have broken that for a view that a
+few lines of CSS handle adequately. Weeks with zero completions still render as
+empty columns — a missing week would be a bug, not a tidy axis.

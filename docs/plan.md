@@ -139,3 +139,28 @@ cheapest things to trim if time runs short.
   is better than the single-file structure I had specified, and sharing
   `filters.py` between the list view and the export removed a whole class of
   drift bug before it existed.
+
+### Session 6 — Dashboard, alerts, scheduling, seed data
+- **Estimated:** 2h
+- **Actual:** 2h 10m
+- **Where it went:** The dashboard and alerts were fast, because both are
+  aggregate views over work already done — that was the reason for scheduling
+  them last. Time went instead on deployment and data: a Render deploy that
+  failed on transient port detection despite a successful build and a running
+  server, the discovery that the root URL 403s for a logged-in technician
+  (login redirect was role-aware from session 5, the root URL was not), and
+  running the seed against Neon from a local machine because the free tier has
+  no shell.
+- **Cut or deferred:** Nothing. All ten goals met.
+- **Total across six sessions:** 14h 30m, against a 12h budget.
+
+## What I cut
+
+Nothing from the ten goals. Deliberately not built, each with reasoning in
+`decisions.md` or `architecture.md`: a REST API, a background worker,
+Postgres full-text search, a charting library, any CSS framework or
+JavaScript, and database-level enforcement of the timeline's immutability.
+
+No stretch ideas were attempted. The brief is explicit that they never
+substitute for a goal, and the remaining time went to closing goal 4's
+scheduling gap and to documentation instead.

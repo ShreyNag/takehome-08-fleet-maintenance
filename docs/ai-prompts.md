@@ -1176,3 +1176,239 @@ file built to fail four ways — unknown registration, duplicate row, text where
 an integer belongs, reading lower than current — alongside three valid rows.
 Four distinct reasons with correct line numbers, three rows applied. Also
 confirmed a headerless file parses and a non-CSV upload is rejected cleanly.
+
+## Session 6 — dashboard, alerts, scheduling, seed data
+
+**Claude Code:**
+
+> Session 6 of 6 — the final session on this Django project (fleetcare).
+> Sessions 1-5 built auth, the schema, vehicle and record CRUD, the full
+> service lifecycle with an immutable timeline, assignment, server-side
+> search/filter/pagination, and CSV import/export. 127 tests passing.
+>
+> This session: goals 8 (dashboard) and 10 (overdue alerts), closing a known
+> gap in goal 4, and seed data.
+>
+> ## Goal 8 — dashboard
+>
+> The manager's landing view. Four headline numbers: vehicles due for service,
+> vehicles currently in service, services completed this week, vehicles overdue
+> for service. Plus a breakdown of records by status, a breakdown by
+> technician, and a chart of services completed per week over the last eight
+> weeks.
+>
+> Every number must come from SQL aggregation. No Python loops over querysets,
+> no counting in the template. Reuse the existing
+> `VehicleQuerySet.with_service_status()` annotation and the
+> `ServiceRecord.objects.overdue()` filter — do not reimplement the grace
+> period comparison anywhere.
+>
+> Use `TruncWeek` for the eight-week series, and make sure weeks with zero
+> completions still appear as zero rather than being absent. A gap in the
+> x-axis is a bug.
+>
+> Aim for a small number of queries total, not one per widget. Add an
+> `assertNumQueries` test so the dashboard cannot silently grow query count as
+> someone adds a widget later.
+>
+> **The chart: no JavaScript.** Decision #17 says no JS and no CSS framework,
+> and that stands. Draw the eight-week series as CSS-scaled bars — a div per
+> week with a height percentage relative to the maximum, labelled with the week
+> and the count. No Chart.js, no CDN, no canvas. If you think this is the wrong
+> call, say so before implementing rather than after.
+>
+> Technicians should not see the fleet-wide dashboard. Their landing page stays
+> the cross-vehicle record list from session 5. A technician requesting the
+> dashboard URL gets 403.
+>
+> ## Goal 10 — overdue alerts
+>
+> - An alerts area listing every overdue record — status DUE with
+>   `due_since + grace period < now` — using the existing overdue filter.
+> - A count badge in the nav, on every page, via a context processor. It must
+>   not add a query on pages that do not display it, so keep it lazy.
+> - A fleet manager can dismiss an alert. `AlertDismissal` already exists,
+>   keyed to the service record (session 2) — dismissing writes a row and the
+>   alert drops off the list and out of the badge count.
+> - Because dismissal is keyed to the RECORD, goal 10's reappearance rule needs
+>   no extra logic: when the vehicle becomes due again a new ServiceRecord
+>   exists, no dismissal references it, and the alert returns. Write a test
+>   proving this end to end — dismiss, complete the service, advance the
+>   vehicle past its next threshold, confirm a new alert appears.
+> - Manager-only. A technician gets 403 on dismiss.
+> - Dismissal is a state change, so POST only, consistent with
+>   archive/restore.
+>
+> ## Closing the goal 4 gap
+>
+> `ensure_due_record` currently runs on odometer update and service completion,
+> which covers the mileage threshold. The date threshold only fires if
+> something else touches the vehicle, so a vehicle sitting untouched past its
+> date interval is never flagged. `check_due_vehicles` exists but nothing runs
+> it.
+>
+> Check whether Render's free tier supports scheduled jobs. If it does, add the
+> configuration and tell me exactly what to set in the dashboard. If it does
+> not, implement a protected endpoint that runs the same check — authenticated
+> by a secret token from an environment variable, not open to the world — so an
+> external scheduler can hit it. Rate-limit or guard it sensibly.
+>
+> Either way, document the approach and its limitations in a comment and tell
+> me what to configure.
+>
+> ## Seed data
+>
+> A `seed_demo` management command producing a fleet that demonstrates the
+> system rather than an empty shell:
+>
+> - ~30 vehicles, realistic vans and trucks, varied intervals and readings.
+> - A spread of states: some OK, some due, some overdue, some booked, some in
+>   service, a few archived, at least one never-serviced.
+> - Eight weeks of completed history so the chart has a real shape.
+> - Several technicians, with records across multiple vehicles so the
+>   by-technician breakdown is meaningful.
+> - Timeline events consistent with that history — a completed record should
+>   have its created/booked/started/completed events, not a bare row.
+> - Idempotent, and it must CLEAR existing demo data first so running it twice
+>   gives the same fleet.
+> - Must not delete or alter the accounts seeded by `seed_users`.
+>
+> Do NOT wire this into build.sh — I want to run it deliberately, not on every
+> deploy. Tell me how to run it against the deployed database.
+>
+> ## Tests
+>
+> - Each of the four headline numbers is correct against known fixture data.
+> - The eight-week series includes zero-completion weeks.
+> - assertNumQueries on the dashboard.
+> - Technician gets 403 on the dashboard.
+> - The alerts list matches the overdue queryset filter exactly.
+> - Dismissing removes a record from both the list and the badge count.
+> - The reappearance rule: dismiss, complete, cross the next threshold, new
+>   alert appears.
+> - Technician gets 403 on dismiss.
+> - The badge count is correct for a manager and appropriate for a technician.
+> - seed_demo is idempotent and leaves seeded users intact.
+>
+> ## Do not
+>
+> - Add JavaScript or a CSS framework.
+> - Reimplement the overdue or due-status logic — reuse what exists.
+> - Change any existing model, service function or filter unless a genuine bug
+>   requires it, and tell me before doing so.
+>
+> ## Git
+>
+> Commit per feature: dashboard, alerts + badge, the scheduled due check, seed
+> data. Each with its tests.
+>
+> Before starting, give me a short plan — particularly how you intend to keep
+> the dashboard's query count low, and what you find regarding Render's
+> scheduled job support.
+
+The instruction worth highlighting is the chart. Goal 8 wants one and decision
+#17 forbids JavaScript; that tension needed resolving in the prompt rather than
+being discovered mid-implementation. Also specified: reuse the existing
+`with_service_status()` annotation and `overdue()` filter rather than
+reimplementing the grace period a fourth time, and an `assertNumQueries` test so
+the dashboard cannot silently grow its query count as widgets get added. It came
+in at five queries total.
+
+### What it flagged back
+
+**Render's free tier has no cron.** Confirmed by searching rather than assumed,
+and it built a token-authenticated endpoint instead. Decision #29.
+
+**The dashboard counts overlap.** Raised unprompted: "due" includes overdue
+vehicles as a subset, so due + overdue is not a clean partition. I then misread
+the row myself when I looked at the seeded data, which settled it — if the
+person who built it misreads it, it needs a caption. Decision #26.
+
+### Running the seed against production
+
+Render's free tier has no shell, so `seed_demo` had to run from my machine with
+`DATABASE_URL` pointed at Neon. Rather than ask for commands, I asked for an
+explanation first:
+
+**Claude Code:**
+
+> I need to run the seed_demo management command against the deployed Neon
+> database. Render's free tier has no shell access, so this has to run from my
+> local machine with DATABASE_URL pointed at Neon.
+>
+> Before anything else, walk me through it rather than doing it — I want to
+> understand what I'm running against production data.
+>
+> ## Tell me
+>
+> 1. The exact steps to run seed_demo against Neon from my Windows machine
+>    (PowerShell). I would rather set DATABASE_URL as a temporary environment
+>    variable for one command than edit my .env, so I cannot forget to undo it
+>    — tell me the PowerShell syntax for that, or tell me if editing .env is
+>    safer and why.
+>
+> 2. Exactly what seed_demo deletes before it inserts. Be specific about how it
+>    identifies demo data by prefix, and confirm what it will NOT touch. I have
+>    real accounts on that database — manager@fleetcare.demo,
+>    tech@fleetcare.demo, and my admin account — and they must survive.
+>
+> 3. Whether any data currently on Neon that was NOT created by seed_demo will
+>    be removed. I have leftover test vehicles from earlier sessions. I want
+>    those gone, but tell me whether seed_demo removes them or whether they
+>    survive and I need to delete them separately.
+>
+> 4. Whether it is safe to run twice, and what happens if it is interrupted
+>    partway.
+>
+> 5. Roughly how long it will take and whether the row volume risks hitting
+>    Neon's free tier limits.
+>
+> ## Then, after I confirm
+>
+> Give me the commands to run, and a verification query I can paste into Neon's
+> SQL editor afterwards to confirm the fleet is there, the counts look right,
+> and the demo user accounts are intact.
+>
+> Do not run anything against my production database yourself and do not modify
+> seed_demo unless I ask. Explanation only for now.
+
+The answers that mattered: `_clear_previous()` deletes only vehicles whose
+registration starts with `FC-DEMO-`, via `all_objects` so archived ones are
+included, with records, timeline events, assignments and dismissals following
+by cascade. No line in the file touches a user account. Everything from the
+clear through the last write is inside one `transaction.atomic()`, so an
+interruption rolls back rather than half-seeding. It also recommended a
+session-scoped PowerShell variable over editing `.env`, on the grounds that a
+file persists across sessions and a variable dies with the window.
+
+It declined to guess, too: my leftover test vehicles do not match the prefix and
+survive, and it said so rather than inventing a broader pattern and deleting
+against production on its own initiative.
+
+### Two problems I found by using the app, not by testing it
+
+**A 403 on the root URL.** Session 5 made the login redirect role-aware, but `/`
+still pointed everyone at the dashboard, which session 6 made manager-only. A
+technician with an existing session hitting the bare URL got a 403 — exactly
+what a reviewer would do after logging in with the technician credentials. It
+only surfaced because incognito worked and my normal browser did not, which
+isolated it to the session cookie.
+
+**A create form that did not explain itself.** The service record form asks only
+for a description, and I wondered where technician assignment had gone. It
+belongs at booking, and moving it earlier would break the lifecycle — decision
+#28. Fixed with helper text rather than by moving the field.
+
+Neither was caught by 162 passing tests, because both are questions about
+whether the app makes sense to use rather than whether it behaves correctly.
+
+### A deployment failure with nothing wrong
+
+One deploy failed after 15 minutes with a successful build, gunicorn listening
+on the right port, and a worker booted — Render reported "no open ports
+detected" and timed out. Redeploying the identical commit worked. The health
+check had received a 302 from `/`, which redirects unauthenticated visitors to
+login; whether that contributed or it was simply transient, I could not
+determine. Worth recording because the instinct on a failed deploy is to change
+something, and the correct action here was to read the log carefully enough to
+see that the server had started fine, then retry.

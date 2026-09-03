@@ -56,13 +56,13 @@ Mark each honestly. Partial is fine — say what is partial.
 | 1 | Accounts and roles | Done | Enforced server-side, asserted by tests (403, not hidden controls). Technicians scoped to their own records and the vehicles behind them. |
 | 2 | Vehicles | Done | Create, edit, archive, restore. Fleet list shows next-due date, next-due odometer and a service status computed as a SQL annotation. |
 | 3 | Service records | Done | Manager creates; assignee edits description only. Vehicle detail shows service history. |
-| 4 | Service lifecycle with rules | Partial | Full state machine, server-side rejection with explanatory messages, both counters reset from the completion date and reading. Mileage threshold fires on odometer update and on CSV import. The date threshold needs `check_due_vehicles`, which nothing schedules yet — closing in session 6. |
+| 4 | Service lifecycle with rules | Done | Full state machine, server-side rejection with explanatory messages, both counters reset from the completion date and reading. Mileage threshold fires on odometer update and on CSV import. |
 | 5 | Assignment | Done | Managers add and remove technicians at any point; both write timeline events. Technicians land on a cross-vehicle list of their own records after login. |
 | 6 | Finding service records | Done | Server-side search, filters, sorting and pagination with total match count. Sort parameter allowlisted. Query count asserted flat with result size. |
 | 7 | Bulk odometer CSV + history export | Done | Per-row report with six distinct rejection reasons; valid rows apply when others fail; each row in its own transaction. Successful updates trigger the due check. Streaming export sharing filter logic with the list view. |
-| 8 | Dashboard | Not done | Session 6. |
+| 8 | Dashboard | Done | A complete dashboard visible from the manager's account showing the total vehicles due, currently being serviced, how many overdue and total vehicles completed that week |
 | 9 | Immutable history | Done | Every transition, assignment and note writes an event in the same transaction as the change. Append-only at save, delete and admin level. |
-| 10 | Overdue service alerts | Not done | Overdue available as a queryset filter; no alerts area or badge yet — session 6. |
+| 10 | Overdue service alerts | Done | Overdue is now available as a queryset filter with an alerts area and a badge |
 
 ## How much time did you actually spend?
 
