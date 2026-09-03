@@ -4,14 +4,16 @@ URL configuration for fleetcare project.
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
-from django.views.generic import RedirectView
 
 from accounts import views as accounts_views
 from fleet.views import DashboardView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', RedirectView.as_view(pattern_name='dashboard'), name='home'),
+    # Role-aware: accounts.views.HomeRedirectView, not a bare
+    # RedirectView(pattern_name='dashboard') -- see its docstring for why
+    # that was a bug once the dashboard became manager-only.
+    path('', accounts_views.HomeRedirectView.as_view(), name='home'),
     path('login/', accounts_views.FleetLoginView.as_view(), name='login'),
     path('logout/', auth_views.LogoutView.as_view(), name='logout'),
     # Goal 8: real aggregation logic, so it lives in fleet (which owns
