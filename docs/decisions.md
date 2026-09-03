@@ -678,3 +678,55 @@ Decision #17 committed to no JavaScript and no external dependencies. A
 charting library for one bar chart would have broken that for a view that a
 few lines of CSS handle adequately. Weeks with zero completions still render as
 empty columns — a missing week would be a bug, not a tidy axis.
+
+## 31. A permission enforced on the endpoint, not on the capability
+
+**Session 6.**
+
+Goal 5 says only a fleet manager can add or remove a technician's assignment.
+The assign and unassign views were gated on `FleetManagerRequiredMixin` from
+the start, with tests asserting 403 for a technician — including the
+self-assignment case, where the submitted technician is the requester
+themselves.
+
+The gate was still incomplete. **Booking** creates a `ServiceAssignment` as
+part of moving a record `DUE → BOOKED` (goal 4), and the book endpoint was
+reachable by an already-assigned technician. So a technician added to a Due
+record could book it, create an assignment, and begin work — without ever
+touching the endpoint named "assign".
+
+Found by using the app rather than by testing it. The timeline showed
+`DUE → BOOKED` performed by `t.alvarez@fleetcare.demo`, which is a manager's
+decision appearing under a technician's name.
+
+**The first fix was insufficient.** It permitted a non-manager to book provided
+the submitted technician was themselves — self-assignment with extra steps. A
+technician booking themselves still creates an assignment row and still makes
+the scheduling decision. It also undermines goal 10: the overdue mechanism
+depends on records remaining Due until a manager books them, so a technician
+who can self-book can clear a manager's alert by deciding to pick up the work.
+
+Booking is now `FleetManagerRequiredMixin`, in every status, for every
+technician including themselves. Assigned technicians can still move a booked
+record to In Service and Completed — that is their work, and goal 1 restricts
+what technicians do to records, not whether they do the work on them.
+
+**The lesson is about where the tests were pointed.** They asserted "a
+technician cannot call the assign endpoint" when the requirement is "a
+technician cannot cause an assignment." Those are the same sentence only if you
+already know every path that assigns, and booking does it as a side effect of a
+transition under a name that does not suggest it.
+
+Afterwards I audited every path that can create or delete a `ServiceAssignment`
+row: the assign view, the unassign view, booking, and the Django admin. The
+first two were always correct, booking is now fixed, and the admin sits outside
+the application's role model entirely — `UserManager.create_user()` hard-codes
+`is_staff=False`, so no fleet manager or technician account can reach it. Only
+a superuser credential provisioned through environment variables can, which is
+the same boundary described for timeline immutability in #27.
+
+Decision #23 — routing `book_service` through `assign_technician` so there is
+one code path for assignment — made this easier to reason about but did not
+prevent it, because the permission lived on the view rather than in the service
+function. A check inside `assign_technician` itself would have caught every
+caller. That is what I would change with more time.

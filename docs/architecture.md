@@ -172,6 +172,20 @@ unauthorised record or vehicle. Vehicles and records need separate
 implementations because scoping records is one M2M hop while scoping vehicles
 is a reverse-FK-then-M2M traversal needing `.distinct()` — decision #19.
 
+Authorisation is enforced per capability, not per endpoint name — a lesson
+learned the hard way. Booking creates a technician assignment as a side effect
+of a status transition, so it needs the same manager-only gate as the endpoint
+actually called "assign". Every path that can create or delete a
+`ServiceAssignment` row is manager-gated: the assign view, the unassign view,
+and booking. See decision #31.
+
+The Django admin sits outside this role model by design. It is gated on
+`is_staff`, which `UserManager.create_user()` hard-codes to `False`, so no
+fleet manager or technician account can reach it — only a superuser credential
+provisioned through environment variables. This is the same boundary as the
+timeline's immutability: the application's own rules hold for every code path
+within it, and an operator with admin or direct SQL access sits outside them.
+
 ## What I decided not to build
 
 **A REST API.** Server-rendered templates only. A mobile client would require

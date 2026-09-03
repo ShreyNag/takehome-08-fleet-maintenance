@@ -57,7 +57,7 @@ Mark each honestly. Partial is fine — say what is partial.
 | 2 | Vehicles | Done | Create, edit, archive, restore. Fleet list shows next-due date, next-due odometer and a service status computed as a SQL annotation. |
 | 3 | Service records | Done | Manager creates; assignee edits description only. Vehicle detail shows service history. |
 | 4 | Service lifecycle with rules | Done | Full state machine, server-side rejection with explanatory messages, both counters reset from the completion date and reading. Mileage threshold fires on odometer update and on CSV import. |
-| 5 | Assignment | Done | Managers add and remove technicians at any point; both write timeline events. Technicians land on a cross-vehicle list of their own records after login. |
+| 5 | Assignment | Done | Managers add and remove technicians at any point; both write timeline events. Booking is manager-only, since it creates an assignment as a side effect. Technicians land on a cross-vehicle list of their own records. |
 | 6 | Finding service records | Done | Server-side search, filters, sorting and pagination with total match count. Sort parameter allowlisted. Query count asserted flat with result size. |
 | 7 | Bulk odometer CSV + history export | Done | Per-row report with six distinct rejection reasons; valid rows apply when others fail; each row in its own transaction. Successful updates trigger the due check. Streaming export sharing filter logic with the list view. |
 | 8 | Dashboard | Done | A complete dashboard visible from the manager's account showing the total vehicles due, currently being serviced, how many overdue and total vehicles completed that week |

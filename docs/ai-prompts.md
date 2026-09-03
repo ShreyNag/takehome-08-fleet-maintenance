@@ -1412,3 +1412,45 @@ login; whether that contributed or it was simply transient, I could not
 determine. Worth recording because the instinct on a failed deploy is to change
 something, and the correct action here was to read the log carefully enough to
 see that the server had started fine, then retry.
+
+### The bug worth reading: booking assigned without being called "assign"
+
+Found by clicking around, not by tests. A technician the manager had *added*
+to a Due record — assigned but not booked — could book it themselves and start
+work. The timeline made it plain: `DUE → BOOKED` performed by
+`t.alvarez@fleetcare.demo`.
+
+I wrote the prompt to diagnose rather than fix, and specifically to explain why
+the existing tests had missed it:
+
+> Session 5 has tests asserting a technician gets 403 on assign and unassign.
+> Explain why they did not catch this — most likely they set up a BOOKED record
+> while the vulnerable path is a DUE one. Tell me exactly what those tests
+> exercise.
+
+The answer was better than my guess. Assign and unassign were correctly gated
+all along, self-assignment included. The gap was **booking**, which creates a
+`ServiceAssignment` as a side effect of a transition — a path the assign tests
+were never going to reach because it is not the assign endpoint.
+
+**The first fix was wrong and I sent it back.** It allowed a non-manager to
+book provided the technician submitted was themselves, which is self-assignment
+by another route and still lets a technician make the scheduling decision that
+clears a manager's overdue alert. Booking is now manager-only outright.
+
+Then I asked for an audit rather than assuming booking was the only case:
+
+> Confirm for me: which endpoints or service functions can cause a
+> ServiceAssignment row to be created or deleted, directly or as a side effect?
+> List all of them and state which role gate each has.
+>
+> Booking was the one I missed because it assigns as a side effect of a
+> transition rather than being named "assign". I want to know there isn't a
+> third path with the same shape.
+
+Four paths, confirmed by reading each function in full rather than by grep
+alone: assign, unassign, booking, and the Django admin. No fourth surprise.
+
+Worth recording that 162 passing tests did not catch this, and neither did the
+prompts that specified the permission, because both were framed around the
+endpoint rather than the capability. Decision #31.
