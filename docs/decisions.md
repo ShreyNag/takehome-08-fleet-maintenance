@@ -495,3 +495,85 @@ vector, and a different query API — time better spent on goals 8 and 10.
 
 Recorded in a comment at the call site as the fix if it ever gets slow, and in
 `schema.md` as the second thing that breaks at 100x.
+
+## 26. "Due" and "in service" read off ServiceRecord.status, not off with_service_status()
+
+**Session 6.**
+
+**Chose:** The dashboard's `due_vehicles` and `in_service_vehicles` headline numbers come from a
+`ServiceRecord` aggregate grouped by status, counting distinct vehicles.
+**Rejected:** Reading both off `VehicleQuerySet.with_service_status()`, since the brief calls for
+reusing that annotation.
+
+`with_service_status()` (decision #20) only distinguishes OVERDUE from "any other open record" —
+BOOKED and IN_SERVICE both fall under its DUE label, because the vehicle-list badge it was built
+for never needed to tell them apart. Reusing it for the "due" headline would have silently
+double-counted an in-service vehicle as also due. `with_service_status()` is still reused, just for
+`overdue_vehicles` only — the one number where its OVERDUE branch is exactly what's needed, and
+where the alternative really would be re-deriving the grace-period comparison.
+
+Verified with a regression test (`test_in_service_vehicle_is_not_also_counted_as_due`) after an
+earlier draft caught exactly this double-count against fixture data.
+
+## 27. Two new read-only modules, not more of services.py or filters.py
+
+**Session 6.**
+
+**Chose:** `fleet/dashboard.py` (goal 8's aggregation) and `fleet/alerts.py` (goal 10's
+overdue-and-undismissed queryset), each with one function, imported by the views.
+**Rejected:** Folding dashboard aggregation into `filters.py` (closest existing read-side module),
+or into `services.py`.
+
+Decision #22's split was by concern: `services.py` is lifecycle *mutation*, `filters.py` is
+scoping/search/sort for one specific list. Goal 8's aggregation and goal 10's alert query are
+read-only like `filters.py`, but neither *is* "scope/filter/sort the record list" — forcing them in
+there would be the same "shared name, nothing actually shared" problem decision #19 already argued
+against for the technician-scoping mixins. `alerts.py` earns the separation further: it's called
+from three places (the context processor, the alerts view, dismiss's implicit re-check), so a
+single function is what keeps those three from drifting on what "currently an alert" means, the
+same drift argument decision #22 made for `filters.py` itself.
+
+## 28. A protected endpoint instead of a Render scheduled job
+
+**Session 6.**
+
+**Chose:** `POST /internal/check-due-vehicles/`, authenticated by a `DUE_CHECK_TOKEN` shared
+secret, meant to be called by an external free scheduler.
+**Rejected:** Render's native Cron Jobs feature.
+
+Checked directly: Render's Cron Jobs have no free tier — billed per-minute from a $1/mo minimum,
+separate from the free web-service plan this app runs on (decision #4's Neon-not-Render-Postgres
+reasoning was cost-driven for the same underlying reason). Since `check_due_vehicles` already
+existed as a management command with nothing to trigger it on a timer (decision from session 4,
+recorded there as a known gap), the fix is an endpoint an outside scheduler can hit instead of a
+Render-native feature this plan doesn't have.
+
+The endpoint reuses `ensure_due_record()` via a new shared `sweep_due_vehicles()` (factored out of
+the management command's own loop, not duplicated) rather than reimplementing the sweep. Token
+comparison uses `constant_time_compare`, and an unset token 403s unconditionally — "not configured"
+never quietly means "not checked."
+
+## 29. Seeding demo history by driving the real state machine with time patched, not by hand-building rows
+
+**Session 6.**
+
+**Chose:** `seed_demo`'s historical completions run `book_service` / `start_service` /
+`complete_service` for real, with `django.utils.timezone.now` patched to a backdated instant for
+the duration of each one.
+**Rejected:** Directly constructing `ServiceRecord` rows in a COMPLETED state and hand-writing
+matching `TimelineEvent` rows to look right.
+
+The brief wants a completed seed record to have its full CREATED/BOOKED/STARTED/COMPLETED timeline,
+not a bare row — hand-building that timeline is exactly the kind of second copy of the state
+machine's behaviour decision #22 already argues against elsewhere in this codebase, just applied to
+seed data instead of a view. Patching `timezone.now()` (not `fleet.services.timezone.now` alone)
+means every `auto_now_add`/`auto_now` field touched during the patched block — `TimelineEvent.
+created_at` included — lands on the same backdated instant as the completion itself, so a seeded
+record's timeline reads as a coherent history rather than "completed 6 weeks ago, according to
+events all stamped today."
+
+Idempotency is a registration-number prefix (`FC-DEMO-`), not a fixed set of primary keys:
+`handle()` deletes every vehicle under that prefix (and, via CASCADE, their records/timeline/
+assignments) before recreating the fleet, verified empirically that Django's deletion Collector for
+a CASCADE doesn't route through `TimelineEventQuerySet.delete()`'s override — that guard exists for
+the *application's* code paths, not a data-management script's cleanup of rows it owns outright.

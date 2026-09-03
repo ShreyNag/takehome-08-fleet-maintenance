@@ -16,5 +16,7 @@ services:
         value: https://fleetcare.onrender.com
       - key: DATABASE_URL
         sync: false  # set manually to the Neon connection string, not stored in git
+      - key: DUE_CHECK_TOKEN
+        sync: false  # set manually -- see DEPLOY.md "Scheduling the due-vehicle sweep"
       - key: PYTHON_VERSION
         value: "3.12.9"

@@ -44,3 +44,57 @@ Record the emails/passwords in `SUBMISSION.md`.
 Render's free web services spin down after inactivity; the first request after idling can take
 about a minute to wake up. Mention this in `SUBMISSION.md` so a slow first load isn't mistaken for
 a broken deploy.
+
+## Seeding a demo fleet (`seed_demo`)
+
+Not run by `build.sh` — deliberately run by hand, not on every deploy. It clears its own
+previously-seeded vehicles first (matched by the `FC-DEMO-` registration-number prefix) and never
+touches the `seed_users` accounts, so it's safe to re-run.
+
+Render's free tier has no Shell (that's a paid feature — see decision #5 in `docs/decisions.md`),
+so run it locally against the deployed database instead of on Render itself:
+
+1. Make sure `python manage.py seed_users` has already been run against that database (`seed_demo`
+   looks up `manager@fleetcare.demo` as the actor for every write it makes, and errors out if that
+   account doesn't exist yet — `build.sh` already does this on every deploy, so it normally has).
+2. Point `DATABASE_URL` at the deployed database — either export it in your shell for one command,
+   or copy it into your local `.env` temporarily:
+   ```
+   DATABASE_URL="<the Neon connection string from the Render dashboard>" python manage.py seed_demo
+   ```
+3. Re-running it is safe and gives back the same fleet — do this to clear stray test vehicles: it
+   deletes every `FC-DEMO-*` vehicle and its records before recreating them.
+
+If you're on a paid Render plan with Shell access, `python manage.py seed_demo` in the Render Shell
+works exactly the same way.
+
+## Scheduling the due-vehicle sweep (goal 4)
+
+`POST /internal/check-due-vehicles/` needs `DUE_CHECK_TOKEN` set (Render dashboard → Environment;
+generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`). With that set,
+point a free external scheduler at it every few hours, for example:
+
+- **cron-job.org** (free): create a job with URL
+  `https://<your-app>.onrender.com/internal/check-due-vehicles/?token=<DUE_CHECK_TOKEN>`, method
+  POST, schedule every 6 hours (or whatever cadence you like — the endpoint itself won't actually
+  re-run inside 5 minutes of its last run either way).
+- **A scheduled GitHub Actions workflow**, if you'd rather not use a third party:
+  ```yaml
+  on:
+    schedule:
+      - cron: "0 */6 * * *"
+  jobs:
+    check-due:
+      runs-on: ubuntu-latest
+      steps:
+        - run: |
+            curl -fsS -X POST \
+              -H "Authorization: Bearer ${{ secrets.DUE_CHECK_TOKEN }}" \
+              https://<your-app>.onrender.com/internal/check-due-vehicles/
+  ```
+  with `DUE_CHECK_TOKEN` added as a repo secret matching the Render env var.
+
+Without either configured, the date threshold only gets re-checked when someone edits an odometer
+or completes a service (goal 4's mileage path still works on its own) — nothing is broken by
+leaving this unset, it just means a vehicle that's overdue purely by calendar date won't be flagged
+until the next time it's touched some other way.

@@ -6,6 +6,8 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import IntegrityError, transaction
 from django.http import StreamingHttpResponse
 from django.test import TestCase, override_settings
@@ -1903,5 +1905,106 @@ class CheckDueVehiclesUnconfiguredTests(TestCase):
     def test_unconfigured_token_forbids_every_request(self):
         response = self.client.post(reverse("check-due-vehicles"), HTTP_AUTHORIZATION="Bearer anything")
         self.assertEqual(response.status_code, 403)
+
+
+class SeedDemoCommandTests(TestCase):
+    """seed_demo's own contract: idempotent, a real spread of states, and
+    never touches a row seed_users owns."""
+
+    def setUp(self):
+        call_command("seed_users")
+
+    def test_creates_the_expected_fleet_size(self):
+        call_command("seed_demo")
+        self.assertEqual(
+            Vehicle.all_objects.filter(registration_number__startswith="FC-DEMO-").count(), 30
+        )
+
+    def test_running_twice_gives_back_the_same_fleet(self):
+        call_command("seed_demo")
+        first_pks = set(
+            Vehicle.all_objects.filter(registration_number__startswith="FC-DEMO-").values_list(
+                "registration_number", flat=True
+            )
+        )
+        call_command("seed_demo")
+        second_pks = set(
+            Vehicle.all_objects.filter(registration_number__startswith="FC-DEMO-").values_list(
+                "registration_number", flat=True
+            )
+        )
+        self.assertEqual(first_pks, second_pks)
+        self.assertEqual(
+            Vehicle.all_objects.filter(registration_number__startswith="FC-DEMO-").count(), 30
+        )
+
+    def test_leaves_seed_users_accounts_untouched(self):
+        manager_before = User.objects.get(email="manager@fleetcare.demo")
+        technician_before = User.objects.get(email="tech@fleetcare.demo")
+
+        call_command("seed_demo")
+        call_command("seed_demo")
+
+        manager_after = User.objects.get(email="manager@fleetcare.demo")
+        technician_after = User.objects.get(email="tech@fleetcare.demo")
+        self.assertEqual(manager_before.pk, manager_after.pk)
+        self.assertEqual(manager_before.password, manager_after.password)
+        self.assertEqual(technician_before.pk, technician_after.pk)
+        self.assertEqual(technician_before.password, technician_after.password)
+
+    def test_produces_a_spread_of_service_states_including_never_serviced(self):
+        call_command("seed_demo")
+        statuses = set(
+            Vehicle.objects.filter(registration_number__startswith="FC-DEMO-")
+            .with_service_status()
+            .values_list("service_status", flat=True)
+        )
+        self.assertIn(Vehicle.ServiceStatus.NOT_YET_SERVICED.label, statuses)
+        self.assertIn(Vehicle.ServiceStatus.OVERDUE.label, statuses)
+        self.assertIn(Vehicle.ServiceStatus.OK.label, statuses)
+
+        seeded_records = ServiceRecord.objects.filter(vehicle__registration_number__startswith="FC-DEMO-")
+        self.assertTrue(seeded_records.filter(status=ServiceRecord.Status.BOOKED).exists())
+        self.assertTrue(seeded_records.filter(status=ServiceRecord.Status.IN_SERVICE).exists())
+        self.assertTrue(seeded_records.filter(status=ServiceRecord.Status.COMPLETED).exists())
+
+        archived_count = Vehicle.all_objects.filter(
+            registration_number__startswith="FC-DEMO-", is_archived=True
+        ).count()
+        self.assertGreaterEqual(archived_count, 1)
+
+    def test_completed_records_have_a_full_timeline(self):
+        call_command("seed_demo")
+        completed = ServiceRecord.objects.filter(
+            vehicle__registration_number__startswith="FC-DEMO-", status=ServiceRecord.Status.COMPLETED
+        ).first()
+        self.assertIsNotNone(completed)
+        event_types = set(completed.timeline.values_list("event_type", flat=True))
+        self.assertEqual(
+            event_types,
+            {
+                TimelineEvent.EventType.CREATED,
+                TimelineEvent.EventType.TECHNICIAN_ASSIGNED,
+                TimelineEvent.EventType.STATUS_CHANGED,
+            },
+        )
+        # CREATED(1) + booking's STATUS_CHANGED + TECHNICIAN_ASSIGNED pair
+        # (decision #23 -- booking writes both) + start's STATUS_CHANGED(1)
+        # + complete's STATUS_CHANGED(1) = 5 timeline rows in total.
+        self.assertEqual(completed.timeline.count(), 5)
+
+    def test_completions_are_spread_across_the_eight_week_chart_window(self):
+        call_command("seed_demo")
+        weekly = dashboard_context()["weekly_series"]
+        self.assertEqual(len(weekly), 8)
+        non_zero_weeks = [week for week in weekly if week["count"] > 0]
+        # "a real shape rather than one bar" -- more than a single week
+        # should have completions in it.
+        self.assertGreater(len(non_zero_weeks), 1)
+
+    def test_requires_seed_users_manager_to_already_exist(self):
+        User.objects.filter(email="manager@fleetcare.demo").delete()
+        with self.assertRaises(CommandError):
+            call_command("seed_demo")
 
 
