@@ -170,9 +170,12 @@ property, "which vehicles are due" becomes a full scan plus a loop, and
 `Paginator` cannot give a total without materialising every row.
 
 The cost is a consistency risk: they can drift if written incorrectly. The
-mitigation is that exactly two code paths may write them — completing a
-service and updating an odometer reading — both of which live in the service
-layer, not in views.
+mitigation is that exactly one code path may write them — `complete_service()`,
+in the service layer, not in views. Updating a vehicle's odometer reading
+never writes these fields; it only calls `ensure_due_record()` to check
+whether the new reading has crossed an existing threshold. The thresholds
+themselves are anchored to the last completed service, so an odometer edit
+changes whether one has been crossed, never where it sits.
 
 ## What breaks first at 100x
 

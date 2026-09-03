@@ -11,9 +11,9 @@ services:
       - key: DEBUG
         value: "False"
       - key: ALLOWED_HOSTS
-        value: fleetcare.onrender.com
+        value: fleetcare-ufam.onrender.com
       - key: CSRF_TRUSTED_ORIGINS
-        value: https://fleetcare.onrender.com
+        value: https://fleetcare-ufam.onrender.com
       - key: DATABASE_URL
         sync: false  # set manually to the Neon connection string, not stored in git
       - key: DUE_CHECK_TOKEN

@@ -75,8 +75,11 @@ class Vehicle(models.Model):
     stored on the row rather than computed on read. This is what lets "which
     vehicles are due" be a plain indexed SQL query (``.filter()`` /
     ``.order_by()`` / pagination) instead of a Python loop over every
-    vehicle. Only the service-completion and odometer-update code paths
-    (session 4) may write these two fields — nothing else should ever set
+    vehicle. Only ``complete_service()`` (session 4) may write these two
+    fields. An odometer update changes whether a threshold has been CROSSED
+    (``ensure_due_record()`` reads these fields to check that), never the
+    threshold itself — the thresholds are anchored to the last completed
+    service, not to odometer edits in between. Nothing else should ever set
     them directly.
     """
 

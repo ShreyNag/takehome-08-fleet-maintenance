@@ -136,9 +136,12 @@ countable in SQL. As a Python property, "which vehicles are due" becomes a full
 scan and a loop, and `Paginator` cannot produce a total without materialising
 every row — which is goal 6's forbidden pattern moved one layer down.
 
-The invariant: exactly two code paths write them — completing a service, and
-updating an odometer reading. Both are in `services.py`. Neither field appears
-on any form.
+The invariant: exactly one code path writes them — `complete_service()`, in
+`services.py`. An odometer update calls `ensure_due_record()`, which reads
+these fields to check whether a threshold has just been crossed, but never
+writes them: the thresholds are anchored to the last completed service, not
+to odometer edits in between, so an edit changes whether a threshold has been
+crossed, never where it sits. Neither field appears on any form.
 
 Overdue is the opposite choice: never stored, always derived as
 `status == DUE AND due_since + grace period < now`. A stored flag would need

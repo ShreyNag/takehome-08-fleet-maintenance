@@ -186,8 +186,12 @@ database is on Neon instead. `decisions.md` #4.
 
 Diagnosed as `DisallowedHost` — Render's assigned hostname didn't match the
 `ALLOWED_HOSTS` placeholder, and `DEBUG=False` means Django returns a bare 400
-with no detail. Fixed by setting the real hostname, and by deriving it from
-Render's injected `RENDER_EXTERNAL_HOSTNAME` so it can't go stale.
+with no detail. Fixed by setting the real hostname as a static `ALLOWED_HOSTS`
+environment variable. Deriving it instead from Render's injected
+`RENDER_EXTERNAL_HOSTNAME`, so it couldn't go stale, was suggested at the
+time — I didn't take it. `render.yaml` later carrying a stale placeholder
+hostname, caught in a final review, is the exact staleness that suggestion
+would have prevented.
 
 > ok the app is deployed, now how to log in without signup
 

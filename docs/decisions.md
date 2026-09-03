@@ -103,8 +103,7 @@ environment variables and appears in the repo only as named placeholders in
 **Session 2.**
 
 **Chose:** `next_due_date` and `next_due_odometer` as indexed columns on
-`Vehicle`, recalculated whenever a service completes or an odometer reading
-changes.
+`Vehicle`, recalculated by `complete_service()` whenever a service completes.
 **Rejected:** Computing due-ness on read from the last completed service plus
 the intervals.
 
@@ -117,8 +116,20 @@ which is exactly the "load everything into the browser" pattern goal 6
 forbids, moved one layer down.
 
 The accepted cost is that these columns can drift from the truth. The
-mitigation is confining writes to two code paths in the service layer, stated
-as an invariant in the model docstring.
+mitigation is confining writes to exactly one code path, `complete_service()`,
+stated as an invariant in the model docstring. An odometer update reads these
+fields — `ensure_due_record()` checks whether the new reading has crossed an
+existing threshold — but never writes them: the thresholds are anchored to
+the last completed service, not to odometer edits in between, so there's
+nothing for an odometer edit to recompute.
+
+**Correction, final review:** this was documented — here, in
+`architecture.md`, in `schema.md`, and in the `Vehicle` docstring — as TWO
+write paths, "completing a service and updating an odometer reading," from
+session 2 onward. That was never true; only `complete_service()` ever wrote
+these fields. Caught and corrected against the actual code in a final review
+rather than silently fixed — a documented invariant that was never true is
+worth showing, not just quietly overwriting.
 
 This is the decision I would most expect to be challenged on, and the one I
 would revisit first if the app were read-light and write-heavy rather than the
@@ -238,10 +249,10 @@ expose description only — never `status`, `due_since`, `scheduled_date`,
 not editing them.
 
 Decision #7 established that the next-due columns are denormalised and safe
-only because exactly two code paths write them. A form field is a third code
-path. Leaving these off the form isn't a UI choice, it's how that invariant
-survives contact with a UI built two sessions before the service layer that
-owns it.
+only because exactly one code path writes them. A form field would be a
+second one. Leaving these off the form isn't a UI choice, it's how that
+invariant survives contact with a UI built two sessions before the service
+layer that owns it.
 
 The same reasoning covers the lifecycle fields. Goal 4 requires illegal status
 moves to be rejected by the server with an explanation; a form that lets a

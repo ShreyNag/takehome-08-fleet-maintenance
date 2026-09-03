@@ -18,8 +18,9 @@ Using the blueprint (`render.yaml` in this repo):
    string from step 1 — it's marked `sync: false` in `render.yaml` so Render won't ask for it
    during blueprint creation, but the app won't boot without it.
 4. Render assigns the service a hostname (e.g. `fleetcare-ab12.onrender.com`) which may not match
-   the `fleetcare.onrender.com` placeholder in `render.yaml`. Update `ALLOWED_HOSTS` and
-   `CSRF_TRUSTED_ORIGINS` to the real hostname (with `https://` for the latter) once you know it.
+   the `fleetcare-ufam.onrender.com` placeholder in `render.yaml` (this repo's actual deployed
+   hostname). Update `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` to the real hostname (with
+   `https://` for the latter) once you know it.
 
 Without the blueprint, create the web service by hand with these settings:
 
