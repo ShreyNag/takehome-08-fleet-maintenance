@@ -4,6 +4,9 @@
 
 {% block content %}
   <h1>{% if object %}Edit service record{% else %}New service record{% endif %} — {{ vehicle }}</h1>
+  {% if not object %}
+    <p class="help-text">This record will be created as Due. Book it afterwards to set a scheduled date and assign a technician.</p>
+  {% endif %}
   <form method="post">
     {% csrf_token %}
     {{ form.as_p }}

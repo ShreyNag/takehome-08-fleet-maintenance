@@ -212,6 +212,12 @@ form p {
   margin: 0 0 var(--space-3);
 }
 
+.help-text {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin: 0 0 var(--space-3);
+}
+
 label {
   display: block;
   font-size: 0.8rem;

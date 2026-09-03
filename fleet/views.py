@@ -328,7 +328,10 @@ class ServiceRecordCreateView(FleetManagerRequiredMixin, CreateView):
         form.instance.due_since = timezone.now()
         form.instance.created_by = self.request.user
         response = super().form_valid(form)
-        messages.success(self.request, "Service record created.")
+        messages.success(
+            self.request,
+            "Service record created. Book it to schedule a date and assign a technician.",
+        )
         return response
 
     def get_success_url(self):
