@@ -556,6 +556,11 @@ td form {
   font-size: 0.85rem;
 }
 
+.stat-caption {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
 .dashboard-panels {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
