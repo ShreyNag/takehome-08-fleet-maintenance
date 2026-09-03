@@ -14,7 +14,7 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
-from .models import ServiceAssignment, ServiceRecord, TimelineEvent
+from .models import ServiceAssignment, ServiceRecord, TimelineEvent, Vehicle
 
 # Explicit per-state allow-list rather than a generic "what's the next
 # status" check. COMPLETED maps to an empty set, which is what makes it
@@ -304,3 +304,26 @@ def ensure_due_record(vehicle):
             new_value=ServiceRecord.Status.DUE,
         )
     return record
+
+
+def sweep_due_vehicles():
+    """Closes goal 4's remaining gap: ensure_due_record() above only runs
+    when something else already touches the vehicle (an odometer edit, a
+    completion), which covers the mileage threshold but not the date one --
+    a vehicle sitting untouched past next_due_date needs something to call
+    ensure_due_record() on a timer instead.
+
+    Shared by the check_due_vehicles management command (for a manual or
+    Render-Shell run) and fleet.views.CheckDueVehiclesView (the protected
+    endpoint an external scheduler hits instead, since Render's free tier
+    has no cron/scheduled-job feature) -- one sweep loop rather than two
+    copies that could drift. Returns the ServiceRecords created, not just a
+    count, so a caller that wants per-vehicle detail (the command's stdout)
+    can still get it without a second query.
+    """
+    created = []
+    for vehicle in Vehicle.objects.all():
+        record = ensure_due_record(vehicle)
+        if record is not None:
+            created.append(record)
+    return created

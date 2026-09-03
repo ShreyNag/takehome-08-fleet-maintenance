@@ -3,11 +3,12 @@ from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.http import StreamingHttpResponse
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -34,6 +35,7 @@ from fleet.services import (
     complete_service,
     ensure_due_record,
     start_service,
+    sweep_due_vehicles,
     unassign_technician,
 )
 
@@ -1787,5 +1789,119 @@ class AlertBadgeContextProcessorTests(TestCase):
         mock_overdue.assert_not_called()
         self.assertEqual(response.context["overdue_alert_count"], 0)
         self.assertNotContains(response, "badge-alert-count")
+
+
+class SweepDueVehiclesTests(TestCase):
+    """fleet.services.sweep_due_vehicles -- the shared loop behind both the
+    check_due_vehicles management command and CheckDueVehiclesView. Thin on
+    purpose: it delegates every actual due-ness decision to
+    ensure_due_record, already covered in depth by EnsureDueRecordTests."""
+
+    def test_returns_created_records_only_for_vehicles_that_crossed_a_threshold(self):
+        due_vehicle = make_vehicle(
+            registration_number="SWEEP-DUE",
+            current_odometer=1_000,
+            next_due_date=timezone.localdate() - timedelta(days=1),
+            next_due_odometer=999_999,
+        )
+        not_due_vehicle = make_vehicle(
+            registration_number="SWEEP-NOTDUE",
+            current_odometer=1_000,
+            next_due_date=timezone.localdate() + timedelta(days=30),
+            next_due_odometer=999_999,
+        )
+        never_serviced_vehicle = make_vehicle(registration_number="SWEEP-NEW")
+
+        created = sweep_due_vehicles()
+
+        self.assertEqual({record.vehicle_id for record in created}, {due_vehicle.pk})
+        self.assertFalse(ServiceRecord.objects.filter(vehicle=not_due_vehicle).exists())
+        self.assertFalse(ServiceRecord.objects.filter(vehicle=never_serviced_vehicle).exists())
+
+    def test_does_not_duplicate_an_already_open_record(self):
+        vehicle = make_vehicle(
+            registration_number="SWEEP-DUP",
+            next_due_date=timezone.localdate() - timedelta(days=1),
+            next_due_odometer=999_999,
+        )
+        manager = make_user("sweep-dup-mgr@example.com", User.Role.FLEET_MANAGER)
+        make_record(vehicle, manager, status=ServiceRecord.Status.DUE)
+
+        created = sweep_due_vehicles()
+
+        self.assertEqual(created, [])
+        self.assertEqual(ServiceRecord.objects.filter(vehicle=vehicle).count(), 1)
+
+
+@override_settings(DUE_CHECK_TOKEN="sweep-test-token")
+class CheckDueVehiclesEndpointTests(TestCase):
+    """Goal 4's scheduled-job substitute: a POST endpoint an external
+    scheduler hits, since Render's free tier has no cron feature. No
+    Django session involved anywhere in these tests -- the token IS the
+    auth."""
+
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    def _due_vehicle(self, registration_number):
+        return make_vehicle(
+            registration_number=registration_number,
+            next_due_date=timezone.localdate() - timedelta(days=1),
+            next_due_odometer=999_999,
+        )
+
+    def test_valid_bearer_token_runs_the_sweep(self):
+        vehicle = self._due_vehicle("SWEEP-EP-1")
+        response = self.client.post(
+            reverse("check-due-vehicles"), HTTP_AUTHORIZATION="Bearer sweep-test-token"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["created"], 1)
+        self.assertTrue(
+            ServiceRecord.objects.filter(vehicle=vehicle, status=ServiceRecord.Status.DUE).exists()
+        )
+
+    def test_valid_token_via_query_param(self):
+        self._due_vehicle("SWEEP-EP-2")
+        response = self.client.post(reverse("check-due-vehicles") + "?token=sweep-test-token")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["created"], 1)
+
+    def test_missing_token_is_forbidden(self):
+        self._due_vehicle("SWEEP-EP-3")
+        response = self.client.post(reverse("check-due-vehicles"))
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ServiceRecord.objects.exists())
+
+    def test_wrong_token_is_forbidden(self):
+        response = self.client.post(reverse("check-due-vehicles"), HTTP_AUTHORIZATION="Bearer wrong-token")
+        self.assertEqual(response.status_code, 403)
+
+    def test_get_is_not_allowed(self):
+        response = self.client.get(reverse("check-due-vehicles") + "?token=sweep-test-token")
+        self.assertEqual(response.status_code, 405)
+
+    def test_second_call_within_the_interval_is_rate_limited(self):
+        self.client.post(reverse("check-due-vehicles"), HTTP_AUTHORIZATION="Bearer sweep-test-token")
+        response = self.client.post(
+            reverse("check-due-vehicles"), HTTP_AUTHORIZATION="Bearer sweep-test-token"
+        )
+        self.assertEqual(response.status_code, 429)
+
+
+class CheckDueVehiclesUnconfiguredTests(TestCase):
+    """No DUE_CHECK_TOKEN set (the out-of-the-box local/default state) --
+    the endpoint must fail closed rather than accept anything."""
+
+    def setUp(self):
+        cache.clear()
+
+    @override_settings(DUE_CHECK_TOKEN="")
+    def test_unconfigured_token_forbids_every_request(self):
+        response = self.client.post(reverse("check-due-vehicles"), HTTP_AUTHORIZATION="Bearer anything")
+        self.assertEqual(response.status_code, 403)
 
 

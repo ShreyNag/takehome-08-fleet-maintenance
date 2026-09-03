@@ -161,3 +161,12 @@ LOGOUT_REDIRECT_URL = 'login'
 # from due_since. Env-configurable since "how much grace" is an operational
 # call, not a code constant.
 SERVICE_GRACE_PERIOD_DAYS = env.int('SERVICE_GRACE_PERIOD_DAYS', default=7)
+
+# Goal 4's date-threshold gap (fleet.views.CheckDueVehiclesView): Render's
+# free tier has no cron/scheduled-job feature (confirmed session 6 -- Cron
+# Jobs there start at $1/mo, no free tier), so the periodic due-vehicle
+# sweep is exposed as a POST endpoint an external free scheduler calls
+# instead, authenticated by this shared-secret token rather than a Django
+# session (the caller has none). Left unset, the endpoint 403s
+# unconditionally rather than accepting an empty token -- see the view.
+DUE_CHECK_TOKEN = env('DUE_CHECK_TOKEN', default='')

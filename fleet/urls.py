@@ -44,4 +44,9 @@ urlpatterns = [
     ),
     path("alerts/", views.AlertListView.as_view(), name="alert-list"),
     path("alerts/<int:pk>/dismiss/", views.AlertDismissView.as_view(), name="alert-dismiss"),
+    path(
+        "internal/check-due-vehicles/",
+        views.CheckDueVehiclesView.as_view(),
+        name="check-due-vehicles",
+    ),
 ]

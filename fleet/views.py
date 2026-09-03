@@ -1,10 +1,15 @@
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.http import StreamingHttpResponse
+from django.core.cache import cache
+from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare
+from django.utils.decorators import method_decorator
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView
 from django.views.generic.detail import SingleObjectMixin
 
@@ -38,6 +43,7 @@ from .services import (
     complete_service,
     ensure_due_record,
     start_service,
+    sweep_due_vehicles,
     unassign_technician,
 )
 
@@ -637,3 +643,60 @@ class ServiceRecordUnassignTechnicianView(FleetManagerRequiredMixin, SingleObjec
         else:
             messages.info(request, f"{technician} was not assigned.")
         return redirect("service-record-detail", pk=self.object.pk)
+
+
+# Minimum time between two runs this endpoint will actually execute --
+# see CheckDueVehiclesView. Not a security control (the token is), just a
+# blunt guard against a misconfigured scheduler hammering it.
+DUE_CHECK_MIN_INTERVAL_SECONDS = 300
+_DUE_CHECK_CACHE_KEY = "fleet:check-due-vehicles:last-run"
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class CheckDueVehiclesView(View):
+    """Closes goal 4's gap: ensure_due_record() only re-derives a vehicle's
+    due-ness when something else already touches it (an odometer edit, a
+    completion) -- the date threshold alone, with nobody touching the
+    vehicle, never fires without something calling sweep_due_vehicles() on
+    a timer. Render's free tier (what this app is deployed on) has no
+    cron/scheduled-job feature -- confirmed session 6: Render's Cron Jobs
+    have no free tier, billed per-minute from a $1/mo minimum -- so instead
+    of a Render-native scheduled job, this is a plain POST endpoint an
+    EXTERNAL free scheduler (e.g. cron-job.org, or a scheduled GitHub
+    Actions workflow doing a `curl`) hits every few hours.
+
+    No Django session is involved -- the caller is a script, not a
+    logged-in user -- so this is deliberately NOT gated by
+    FleetManagerRequiredMixin. Authorization is a shared-secret token
+    instead (settings.DUE_CHECK_TOKEN, read from the DUE_CHECK_TOKEN env
+    var), compared with constant_time_compare so response timing can't be
+    used to guess it byte-by-byte. An unset token 403s every request rather
+    than treating "no token configured" as "no auth required".
+
+    csrf_exempt because Django's CSRF protection assumes a session/cookie-
+    bearing browser client, which this caller isn't; the token check is
+    what actually guards the endpoint. Rate-limited to one real run per
+    DUE_CHECK_MIN_INTERVAL_SECONDS via the default cache -- a
+    misconfigured scheduler hammering this every few seconds shouldn't be
+    able to run a full-fleet sweep that often. That's a soft guard against
+    a misconfigured caller, not the endpoint's actual security boundary.
+    """
+
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        configured_token = settings.DUE_CHECK_TOKEN
+        supplied_token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not supplied_token:
+            supplied_token = request.GET.get("token", "")
+        if not configured_token or not constant_time_compare(supplied_token, configured_token):
+            return JsonResponse({"detail": "Forbidden."}, status=403)
+
+        if cache.get(_DUE_CHECK_CACHE_KEY):
+            return JsonResponse({"detail": "Checked too recently -- try again later."}, status=429)
+        cache.set(_DUE_CHECK_CACHE_KEY, True, DUE_CHECK_MIN_INTERVAL_SECONDS)
+
+        created = sweep_due_vehicles()
+        return JsonResponse(
+            {"created": len(created), "vehicles": [r.vehicle.registration_number for r in created]}
+        )
