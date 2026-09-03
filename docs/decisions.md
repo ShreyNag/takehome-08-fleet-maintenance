@@ -539,7 +539,12 @@ same drift argument decision #22 made for `filters.py` itself.
 
 **Chose:** `POST /internal/check-due-vehicles/`, authenticated by a `DUE_CHECK_TOKEN` shared
 secret, meant to be called by an external free scheduler.
-**Rejected:** Render's native Cron Jobs feature.
+**Rejected:** Render's native Cron Jobs feature, and accepting the gap.
+
+`ensure_due_record` fires on odometer update and service completion, which covers the mileage
+threshold fully. The date threshold never fires on its own, so a vehicle sitting untouched past its
+date interval was never flagged — leaving goal 4 half-met, and specifically the half the brief's
+opening scenario describes.
 
 Checked directly: Render's Cron Jobs have no free tier — billed per-minute from a $1/mo minimum,
 separate from the free web-service plan this app runs on (decision #4's Neon-not-Render-Postgres
@@ -549,9 +554,14 @@ recorded there as a known gap), the fix is an endpoint an outside scheduler can 
 Render-native feature this plan doesn't have.
 
 The endpoint reuses `ensure_due_record()` via a new shared `sweep_due_vehicles()` (factored out of
-the management command's own loop, not duplicated) rather than reimplementing the sweep. Token
+the management command's own loop, not duplicated) rather than reimplementing the sweep — so the
+scheduling mechanism can be swapped for a real cron on a paid tier without touching the logic. Token
 comparison uses `constant_time_compare`, and an unset token 403s unconditionally — "not configured"
 never quietly means "not checked."
+
+This is a workaround for a hosting constraint, not a design preference — I would rather have the gap
+closed with an ugly mechanism than left open with a note about it, and on a paid tier this would be a
+scheduled management command instead.
 
 ## 29. Seeding demo history by driving the real state machine with time patched, not by hand-building rows
 
@@ -578,7 +588,7 @@ assignments) before recreating the fleet, verified empirically that Django's del
 a CASCADE doesn't route through `TimelineEventQuerySet.delete()`'s override — that guard exists for
 the *application's* code paths, not a data-management script's cleanup of rows it owns outright.
 
-## 26. Overlapping dashboard counts, labelled rather than partitioned
+## 30. Overlapping dashboard counts, labelled rather than partitioned
 
 **Session 6.**
 
@@ -597,7 +607,7 @@ Rather than change the queries, the row now carries a caption stating that the
 counts overlap and that completed services counts records rather than
 vehicles.
 
-## 27. Living with the immutability rule
+## 31. Living with the immutability rule
 
 **Session 6.**
 
@@ -620,7 +630,7 @@ admin. An operator with direct SQL access still can. A database-level
 constraint would close that, and is the first thing I would add if this were
 production.
 
-## 28. Assignment stays at booking, with guidance instead
+## 32. Assignment stays at booking, with guidance instead
 
 **Session 6.**
 
@@ -642,31 +652,7 @@ differently, which is worse than either.
 
 Fixed the confusion with guidance rather than by moving the field.
 
-## 29. A protected endpoint instead of a scheduled command
-
-**Session 6.**
-
-**Chose:** A token-authenticated POST endpoint that runs the fleet-wide due
-check, called on a schedule by an external cron service.
-**Rejected:** A Render cron job (unavailable on the free tier), and accepting
-the gap.
-
-`ensure_due_record` fires on odometer update and service completion, which
-covers the mileage threshold fully. The date threshold never fires on its own,
-so a vehicle sitting untouched past its date interval was never flagged —
-leaving goal 4 half-met, and specifically the half the brief's opening scenario
-describes.
-
-The endpoint is a thin wrapper around the existing `check_due_vehicles`
-management command rather than a reimplementation, so the scheduling mechanism
-can be swapped for a real cron on a paid tier without touching the logic. The
-token comes from an environment variable; unset, the endpoint refuses
-everything.
-
-This is a workaround for a hosting constraint. I would rather have the gap
-closed with an ugly mechanism than left open with a note about it.
-
-## 30. CSS bars instead of a charting library
+## 33. CSS bars instead of a charting library
 
 **Session 6.**
 
@@ -679,7 +665,7 @@ charting library for one bar chart would have broken that for a view that a
 few lines of CSS handle adequately. Weeks with zero completions still render as
 empty columns — a missing week would be a bug, not a tidy axis.
 
-## 31. A permission enforced on the endpoint, not on the capability
+## 34. A permission enforced on the endpoint, not on the capability
 
 **Session 6.**
 
@@ -723,7 +709,7 @@ first two were always correct, booking is now fixed, and the admin sits outside
 the application's role model entirely — `UserManager.create_user()` hard-codes
 `is_staff=False`, so no fleet manager or technician account can reach it. Only
 a superuser credential provisioned through environment variables can, which is
-the same boundary described for timeline immutability in #27.
+the same boundary described for timeline immutability in #31.
 
 Decision #23 — routing `book_service` through `assign_technician` so there is
 one code path for assignment — made this easier to reason about but did not

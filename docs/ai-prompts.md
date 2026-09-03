@@ -1317,12 +1317,12 @@ in at five queries total.
 ### What it flagged back
 
 **Render's free tier has no cron.** Confirmed by searching rather than assumed,
-and it built a token-authenticated endpoint instead. Decision #29.
+and it built a token-authenticated endpoint instead. Decision #28.
 
 **The dashboard counts overlap.** Raised unprompted: "due" includes overdue
 vehicles as a subset, so due + overdue is not a clean partition. I then misread
 the row myself when I looked at the seeded data, which settled it — if the
-person who built it misreads it, it needs a caption. Decision #26.
+person who built it misreads it, it needs a caption. Decision #30.
 
 ### Running the seed against production
 
@@ -1397,7 +1397,7 @@ isolated it to the session cookie.
 **A create form that did not explain itself.** The service record form asks only
 for a description, and I wondered where technician assignment had gone. It
 belongs at booking, and moving it earlier would break the lifecycle — decision
-#28. Fixed with helper text rather than by moving the field.
+#32. Fixed with helper text rather than by moving the field.
 
 Neither was caught by 162 passing tests, because both are questions about
 whether the app makes sense to use rather than whether it behaves correctly.
@@ -1453,4 +1453,4 @@ alone: assign, unassign, booking, and the Django admin. No fourth surprise.
 
 Worth recording that 162 passing tests did not catch this, and neither did the
 prompts that specified the permission, because both were framed around the
-endpoint rather than the capability. Decision #31.
+endpoint rather than the capability. Decision #34.

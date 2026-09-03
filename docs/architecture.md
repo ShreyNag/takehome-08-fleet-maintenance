@@ -177,7 +177,7 @@ learned the hard way. Booking creates a technician assignment as a side effect
 of a status transition, so it needs the same manager-only gate as the endpoint
 actually called "assign". Every path that can create or delete a
 `ServiceAssignment` row is manager-gated: the assign view, the unassign view,
-and booking. See decision #31.
+and booking. See decision #34.
 
 The Django admin sits outside this role model by design. It is gated on
 `is_staff`, which `UserManager.create_user()` hard-codes to `False`, so no
