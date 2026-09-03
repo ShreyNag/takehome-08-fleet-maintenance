@@ -67,7 +67,11 @@
     </form>
   {% endif %}
   {% if not show_book_form and not show_start_button and not show_complete_form %}
-    <p><em>No actions available — this record is completed.</em></p>
+    {% if service_record.status == "COMPLETED" %}
+      <p><em>No actions available — this record is completed.</em></p>
+    {% else %}
+      <p><em>No actions available to you right now.</em></p>
+    {% endif %}
   {% endif %}
 
   <h2>Timeline</h2>

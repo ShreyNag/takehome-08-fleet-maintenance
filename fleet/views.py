@@ -2,7 +2,6 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.cache import cache
-from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -349,9 +348,16 @@ class ServiceRecordDetailContextMixin:
     """
 
     def build_detail_context(self, service_record):
-        # Who may act is identical to who may view this page at all
-        # (ManagerOrAssignedTechnicianMixin), so no separate permission
-        # check is needed here -- reaching this method already proves it.
+        # Who may view/start/complete is identical to who may view this
+        # page at all (ManagerOrAssignedTechnicianMixin), so no separate
+        # permission check is needed for those -- reaching this method
+        # already proves it. Booking is the one exception: it's goal 5's
+        # manager-only assignment privilege (see ServiceRecordBookView), so
+        # show_book_form additionally requires is_fleet_manager below,
+        # same as assign_technician_form's gate a few lines down -- a
+        # technician assigned to this record can reach this method (e.g.
+        # via a rejected start/complete re-render) but must not see a
+        # Book control that would just 403 if used.
         # Which action is legal is read straight from ALLOWED_TRANSITIONS,
         # the single source of truth the service layer itself checks
         # against, rather than duplicating the state machine's shape here.
@@ -361,12 +367,12 @@ class ServiceRecordDetailContextMixin:
             "timeline": service_record.timeline.select_related("actor"),
             "note_form": TimelineNoteForm(),
             "technicians": service_record.technicians.all(),
-            "show_book_form": ServiceRecord.Status.BOOKED in allowed,
+            "show_book_form": ServiceRecord.Status.BOOKED in allowed and self.request.user.is_fleet_manager,
             "show_start_button": ServiceRecord.Status.IN_SERVICE in allowed,
             "show_complete_form": ServiceRecord.Status.COMPLETED in allowed,
         }
         if context["show_book_form"]:
-            context["book_form"] = BookServiceForm(user=self.request.user)
+            context["book_form"] = BookServiceForm()
         if context["show_complete_form"]:
             context["complete_form"] = CompleteServiceForm()
         # Assignment (goal 5) is manager-only, including for a technician
@@ -423,10 +429,15 @@ class ServiceRecordUpdateView(ManagerOrAssignedTechnicianMixin, UpdateView):
         return response
 
 
-class ServiceRecordActionView(ServiceRecordDetailContextMixin, ManagerOrAssignedTechnicianMixin, SingleObjectMixin, View):
-    """Base for the three transition actions (book/start/complete). Same
-    permission as the detail/edit views: a manager, or a technician
-    assigned to this record.
+class ServiceRecordActionView(ServiceRecordDetailContextMixin, SingleObjectMixin, View):
+    """Base for the three transition actions (book/start/complete).
+    Deliberately carries NO permission mixin of its own -- booking is
+    goal 5's manager-only assignment privilege wearing a transition's
+    clothes (see ServiceRecordBookView), while start/complete are the
+    assigned technician's own work (see ServiceRecordStartView). Baking
+    one permission rule in here for all three, the way this used to work,
+    is exactly what let a technician book themselves in as their own
+    assignment. Each subclass picks its own mixin instead.
 
     On success: redirect back to the detail page (post/redirect/get, so a
     refresh doesn't resubmit the action) with a success message.
@@ -459,49 +470,42 @@ class ServiceRecordActionView(ServiceRecordDetailContextMixin, ManagerOrAssigned
         raise NotImplementedError
 
 
-class ServiceRecordBookView(ServiceRecordActionView):
-    """Booking assigns a technician (goal 4), so it's a second path to the
-    same goal-5 privilege as ServiceRecordAssignTechnicianView -- and
-    unlike that view, this one is reachable by a technician (an assignee
-    booking their own record is intentional, see ServiceRecordActionView's
-    permission). BookServiceForm.technician is an unrestricted choice of
-    any technician, so without this check an assigned technician could
-    book someone ELSE in: a real ServiceAssignment for a technician they
-    picked, via a form that has nothing to do with goal 5's assign/unassign
-    endpoints. A manager may book any technician in; a technician actor may
-    only book themselves."""
+class ServiceRecordBookView(FleetManagerRequiredMixin, ServiceRecordActionView):
+    """Booking assigns a technician (goal 4), which makes it goal 5's
+    manager-only privilege by another name -- FleetManagerRequiredMixin,
+    same as ServiceRecordAssignTechnicianView, not
+    ManagerOrAssignedTechnicianMixin like Start/Complete below. Goal 5 has
+    no exception for a technician assigning themselves: booking is the
+    scheduling decision goal 4 gives to managers, full stop, in every
+    status, for every technician including the one submitting the form."""
 
     success_message = "Service booked."
 
     def perform(self, request):
-        # Deliberately NOT passing user= here (unlike the GET-side
-        # instantiation in build_detail_context): that queryset narrowing
-        # is cosmetic UI only, and if it silently rejected an attempted
-        # cross-technician assignment as "invalid technician" (400), the
-        # real reason -- goal 5's manager-only rule -- would be hidden
-        # behind a generic input-validation error instead of the 403 below.
         form = BookServiceForm(request.POST)
         if not form.is_valid():
             raise InvalidTransitionInput("Enter a valid scheduled date and technician.")
-        technician = form.cleaned_data["technician"]
-        if not request.user.is_fleet_manager and technician != request.user:
-            raise PermissionDenied
         book_service(
             self.object,
             scheduled_date=form.cleaned_data["scheduled_date"],
-            technician=technician,
+            technician=form.cleaned_data["technician"],
             actor=request.user,
         )
 
 
-class ServiceRecordStartView(ServiceRecordActionView):
+class ServiceRecordStartView(ManagerOrAssignedTechnicianMixin, ServiceRecordActionView):
+    """Unlike booking, starting and completing are the assigned
+    technician's own work once a manager has booked them onto the record
+    -- same permission as the detail/edit views, a manager or the
+    technician assigned to this record."""
+
     success_message = "Service started."
 
     def perform(self, request):
         start_service(self.object, actor=request.user)
 
 
-class ServiceRecordCompleteView(ServiceRecordActionView):
+class ServiceRecordCompleteView(ManagerOrAssignedTechnicianMixin, ServiceRecordActionView):
     success_message = "Service completed."
 
     def perform(self, request):

@@ -40,28 +40,15 @@ class BookServiceForm(forms.Form):
     """DUE -> BOOKED. Not a ModelForm -- these two inputs are arguments to
     book_service(), not a 1:1 mapping onto ServiceRecord fields (the
     technician goes into a ServiceAssignment row, not a ServiceRecord
-    column).
-
-    `user` is optional and cosmetic only: when passed and it's a
-    technician (not a manager), the technician choice is narrowed to just
-    that user, so the rendered form can't even offer picking someone else
-    in. The actual rule -- a technician actor may only book themselves --
-    is enforced server-side in ServiceRecordBookView regardless of what
-    this form was constructed with; this narrowing just keeps the UI
-    honest about it.
-    """
+    column). Manager-only at the view layer (FleetManagerRequiredMixin on
+    ServiceRecordBookView) -- this form doesn't enforce that itself, same
+    division of labour as AssignTechnicianForm below."""
 
     scheduled_date = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}))
     technician = forms.ModelChoiceField(
         queryset=User.objects.filter(role=User.Role.TECHNICIAN),
         label="Assign technician",
     )
-
-    def __init__(self, *args, user=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        if user is not None and user.is_technician:
-            self.fields["technician"].queryset = User.objects.filter(pk=user.pk)
-            self.fields["technician"].initial = user.pk
 
 
 class CompleteServiceForm(forms.Form):

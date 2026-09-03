@@ -792,8 +792,13 @@ class OverdueParityTests(TestCase):
 
 
 class TransitionViewPermissionTests(TestCase):
-    """Goal 1/4: a technician not assigned to a record cannot transition
-    it, enforced server-side as a 403."""
+    """Goal 1/4/5. Start and complete: a technician not assigned to the
+    record cannot transition it, enforced server-side as a 403 -- that IS
+    their own work once a manager has booked them onto the record, so an
+    assigned technician can do both. Booking is different: it assigns a
+    technician (goal 4), so goal 5's manager-only rule applies with no
+    exception for self-assignment -- an assigned technician gets 403 on
+    booking exactly like an unassigned one, even booking themselves in."""
 
     def setUp(self):
         self.manager = make_user("tview-mgr@example.com", User.Role.FLEET_MANAGER)
@@ -815,15 +820,97 @@ class TransitionViewPermissionTests(TestCase):
         self.record.refresh_from_db()
         self.assertEqual(self.record.status, ServiceRecord.Status.DUE)
 
-    def test_assigned_technician_can_book_and_start(self):
+    def test_assigned_technician_cannot_book_even_themselves(self):
+        # Goal 5 has no self-assignment exception: booking is the
+        # scheduling decision goal 4 gives to managers, and being already
+        # assigned to the record doesn't change that.
+        before = set(ServiceAssignment.objects.filter(service_record=self.record).values_list("technician_id", flat=True))
         self.client.force_login(self.assigned)
         response = self.client.post(
             reverse("service-record-book", args=[self.record.pk]),
             {"scheduled_date": date.today(), "technician": self.assigned.pk},
         )
+        self.assertEqual(response.status_code, 403)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.DUE)
+        after = set(ServiceAssignment.objects.filter(service_record=self.record).values_list("technician_id", flat=True))
+        self.assertEqual(before, after)
+
+    def test_assigned_technician_cannot_book_another_technician(self):
+        other_technician = make_user("tview-other@example.com", User.Role.TECHNICIAN)
+        self.client.force_login(self.assigned)
+        response = self.client.post(
+            reverse("service-record-book", args=[self.record.pk]),
+            {"scheduled_date": date.today(), "technician": other_technician.pk},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.DUE)
+        self.assertFalse(
+            ServiceAssignment.objects.filter(service_record=self.record, technician=other_technician).exists()
+        )
+
+    def test_manager_can_book(self):
+        self.client.force_login(self.manager)
+        response = self.client.post(
+            reverse("service-record-book", args=[self.record.pk]),
+            {"scheduled_date": date.today(), "technician": self.assigned.pk},
+        )
         self.assertEqual(response.status_code, 302)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.BOOKED)
+
+    def test_manager_can_book_a_different_technician_than_the_one_already_assigned(self):
+        other_technician = make_user("tview-other2@example.com", User.Role.TECHNICIAN)
+        self.client.force_login(self.manager)
+        response = self.client.post(
+            reverse("service-record-book", args=[self.record.pk]),
+            {"scheduled_date": date.today(), "technician": other_technician.pk},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.BOOKED)
+        self.assertTrue(
+            ServiceAssignment.objects.filter(service_record=self.record, technician=other_technician).exists()
+        )
+
+    def test_assigned_technician_can_start_and_complete_once_booked(self):
+        # Booking is manager-only, but starting and completing their own
+        # booked work is unchanged -- that's the technician's job, not an
+        # assignment action.
+        book_service(self.record, scheduled_date=date.today(), technician=self.assigned, actor=self.manager)
+        self.client.force_login(self.assigned)
+
         response = self.client.post(reverse("service-record-start", args=[self.record.pk]))
         self.assertEqual(response.status_code, 302)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.IN_SERVICE)
+
+        response = self.client.post(
+            reverse("service-record-complete", args=[self.record.pk]),
+            {"completed_odometer": self.vehicle.current_odometer},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.COMPLETED)
+
+    def test_unassigned_technician_cannot_start(self):
+        book_service(self.record, scheduled_date=date.today(), technician=self.assigned, actor=self.manager)
+        self.client.force_login(self.unassigned)
+        response = self.client.post(reverse("service-record-start", args=[self.record.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.BOOKED)
+
+    def test_unassigned_technician_cannot_complete(self):
+        book_service(self.record, scheduled_date=date.today(), technician=self.assigned, actor=self.manager)
+        start_service(self.record, actor=self.assigned)
+        self.client.force_login(self.unassigned)
+        response = self.client.post(
+            reverse("service-record-complete", args=[self.record.pk]),
+            {"completed_odometer": self.vehicle.current_odometer},
+        )
+        self.assertEqual(response.status_code, 403)
         self.record.refresh_from_db()
         self.assertEqual(self.record.status, ServiceRecord.Status.IN_SERVICE)
 
@@ -836,108 +923,6 @@ class TransitionViewPermissionTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.record.refresh_from_db()
         self.assertEqual(self.record.status, ServiceRecord.Status.DUE)
-
-
-class BookViewCannotAssignAnotherTechnicianTests(TestCase):
-    """Goal 5: booking assigns a technician (goal 4), so
-    ServiceRecordBookView is a second path to the same manager-only
-    privilege ServiceRecordAssignTechnicianView guards -- and unlike that
-    view, this one is reachable by an assigned technician (self-service
-    booking is intentional, see TransitionViewPermissionTests). Without a
-    check, that technician could pick someone else in BookServiceForm's
-    unrestricted technician field and it would go straight into
-    assign_technician() with no role check at all. Covers every status
-    booking is reachable from (DUE) plus the ones it isn't (BOOKED,
-    IN_SERVICE, COMPLETED), where the assigned/unassigned-mixin permission
-    (or the illegal-transition check) already denies it for an unrelated
-    reason -- included so a future loosening of either doesn't quietly
-    reopen this hole."""
-
-    def setUp(self):
-        self.manager = make_user("bookassign-mgr@example.com", User.Role.FLEET_MANAGER)
-        self.assigned = make_user("bookassign-assigned@example.com", User.Role.TECHNICIAN)
-        self.other_technician = make_user("bookassign-other@example.com", User.Role.TECHNICIAN)
-        self.vehicle = make_vehicle(registration_number="BOOKASSIGN-1")
-
-    def _assign(self, record):
-        ServiceAssignment.objects.create(
-            service_record=record, technician=self.assigned, assigned_by=self.manager
-        )
-
-    def test_assigned_technician_cannot_book_in_another_technician_on_due_record(self):
-        record = make_record(self.vehicle, self.manager, status=ServiceRecord.Status.DUE)
-        self._assign(record)
-        self.client.force_login(self.assigned)
-        response = self.client.post(
-            reverse("service-record-book", args=[record.pk]),
-            {"scheduled_date": date.today(), "technician": self.other_technician.pk},
-        )
-        self.assertEqual(response.status_code, 403)
-        record.refresh_from_db()
-        self.assertEqual(record.status, ServiceRecord.Status.DUE)
-        self.assertFalse(
-            ServiceAssignment.objects.filter(service_record=record, technician=self.other_technician).exists()
-        )
-
-    def test_assigned_technician_still_gets_403_booking_another_technician_when_booked(self):
-        record = make_record(self.vehicle, self.manager, status=ServiceRecord.Status.BOOKED, scheduled_date=date.today())
-        self._assign(record)
-        self.client.force_login(self.assigned)
-        response = self.client.post(
-            reverse("service-record-book", args=[record.pk]),
-            {"scheduled_date": date.today(), "technician": self.other_technician.pk},
-        )
-        self.assertEqual(response.status_code, 403)
-        self.assertFalse(
-            ServiceAssignment.objects.filter(service_record=record, technician=self.other_technician).exists()
-        )
-
-    def test_assigned_technician_still_gets_403_booking_another_technician_when_in_service(self):
-        record = make_record(self.vehicle, self.manager, status=ServiceRecord.Status.IN_SERVICE, scheduled_date=date.today())
-        self._assign(record)
-        self.client.force_login(self.assigned)
-        response = self.client.post(
-            reverse("service-record-book", args=[record.pk]),
-            {"scheduled_date": date.today(), "technician": self.other_technician.pk},
-        )
-        self.assertEqual(response.status_code, 403)
-        self.assertFalse(
-            ServiceAssignment.objects.filter(service_record=record, technician=self.other_technician).exists()
-        )
-
-    def test_assigned_technician_still_gets_403_booking_another_technician_when_completed(self):
-        record = make_record(
-            self.vehicle,
-            self.manager,
-            status=ServiceRecord.Status.COMPLETED,
-            scheduled_date=date.today(),
-            completed_at=timezone.now(),
-            completed_odometer=self.vehicle.current_odometer,
-        )
-        self._assign(record)
-        self.client.force_login(self.assigned)
-        response = self.client.post(
-            reverse("service-record-book", args=[record.pk]),
-            {"scheduled_date": date.today(), "technician": self.other_technician.pk},
-        )
-        self.assertEqual(response.status_code, 403)
-        self.assertFalse(
-            ServiceAssignment.objects.filter(service_record=record, technician=self.other_technician).exists()
-        )
-
-    def test_manager_can_still_book_in_any_technician(self):
-        record = make_record(self.vehicle, self.manager, status=ServiceRecord.Status.DUE)
-        self.client.force_login(self.manager)
-        response = self.client.post(
-            reverse("service-record-book", args=[record.pk]),
-            {"scheduled_date": date.today(), "technician": self.other_technician.pk},
-        )
-        self.assertEqual(response.status_code, 302)
-        record.refresh_from_db()
-        self.assertEqual(record.status, ServiceRecord.Status.BOOKED)
-        self.assertTrue(
-            ServiceAssignment.objects.filter(service_record=record, technician=self.other_technician).exists()
-        )
 
 
 class VehicleTechnicianScopingTests(TestCase):
