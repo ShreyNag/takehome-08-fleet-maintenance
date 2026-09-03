@@ -2,6 +2,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.cache import cache
+from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -365,7 +366,7 @@ class ServiceRecordDetailContextMixin:
             "show_complete_form": ServiceRecord.Status.COMPLETED in allowed,
         }
         if context["show_book_form"]:
-            context["book_form"] = BookServiceForm()
+            context["book_form"] = BookServiceForm(user=self.request.user)
         if context["show_complete_form"]:
             context["complete_form"] = CompleteServiceForm()
         # Assignment (goal 5) is manager-only, including for a technician
@@ -459,16 +460,36 @@ class ServiceRecordActionView(ServiceRecordDetailContextMixin, ManagerOrAssigned
 
 
 class ServiceRecordBookView(ServiceRecordActionView):
+    """Booking assigns a technician (goal 4), so it's a second path to the
+    same goal-5 privilege as ServiceRecordAssignTechnicianView -- and
+    unlike that view, this one is reachable by a technician (an assignee
+    booking their own record is intentional, see ServiceRecordActionView's
+    permission). BookServiceForm.technician is an unrestricted choice of
+    any technician, so without this check an assigned technician could
+    book someone ELSE in: a real ServiceAssignment for a technician they
+    picked, via a form that has nothing to do with goal 5's assign/unassign
+    endpoints. A manager may book any technician in; a technician actor may
+    only book themselves."""
+
     success_message = "Service booked."
 
     def perform(self, request):
+        # Deliberately NOT passing user= here (unlike the GET-side
+        # instantiation in build_detail_context): that queryset narrowing
+        # is cosmetic UI only, and if it silently rejected an attempted
+        # cross-technician assignment as "invalid technician" (400), the
+        # real reason -- goal 5's manager-only rule -- would be hidden
+        # behind a generic input-validation error instead of the 403 below.
         form = BookServiceForm(request.POST)
         if not form.is_valid():
             raise InvalidTransitionInput("Enter a valid scheduled date and technician.")
+        technician = form.cleaned_data["technician"]
+        if not request.user.is_fleet_manager and technician != request.user:
+            raise PermissionDenied
         book_service(
             self.object,
             scheduled_date=form.cleaned_data["scheduled_date"],
-            technician=form.cleaned_data["technician"],
+            technician=technician,
             actor=request.user,
         )
 
