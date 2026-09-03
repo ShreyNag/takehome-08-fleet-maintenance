@@ -18,6 +18,7 @@ from accounts.mixins import (
     ManagerOrAssignedTechnicianMixin,
     VehicleManagerOrAssignedTechnicianMixin,
     VehicleTechnicianScopedQuerysetMixin,
+    scope_vehicles_to_technician,
 )
 from accounts.models import User
 from .alerts import overdue_alerts
@@ -629,7 +630,16 @@ class ServiceRecordListView(LoginRequiredMixin, ListView):
                 sort_links[f"{field}_{direction}"] = link_params.urlencode()
         context["sort_links"] = sort_links
 
-        context["vehicles"] = Vehicle.all_objects.order_by("registration_number")
+        # Same scoping rule VehicleListView/VehicleDetailView enforce
+        # (accounts.mixins.scope_vehicles_to_technician) -- without it, a
+        # technician's "Vehicle" filter dropdown listed every vehicle in the
+        # fleet, including ones they hold no assignment on, even though the
+        # record list itself was already correctly scoped. Reusing the same
+        # function both places means this can't drift out of sync with the
+        # vehicle-list scoping rule the way a second copy could.
+        context["vehicles"] = scope_vehicles_to_technician(
+            Vehicle.all_objects.order_by("registration_number"), self.request.user
+        )
         context["technicians"] = User.objects.filter(role=User.Role.TECHNICIAN)
         context["statuses"] = ServiceRecord.Status.choices
         return context

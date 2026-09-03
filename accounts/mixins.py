@@ -74,6 +74,26 @@ class ManagerOrAssignedTechnicianMixin(LoginRequiredMixin):
         raise PermissionDenied
 
 
+def scope_vehicles_to_technician(queryset, user):
+    """The actual filter behind VehicleTechnicianScopedQuerysetMixin below,
+    pulled out to a plain function so a non-CBV call site (a filter-dropdown
+    queryset, say) can reuse the exact same scoping rule instead of
+    re-deriving it inline -- see fleet.views.ServiceRecordListView, which
+    does exactly that for its "Vehicle" filter.
+
+    A technician's claim on a vehicle is inherited from every ServiceRecord
+    ever raised against it, in ANY status -- including COMPLETED, since past
+    work is still their work -- so this traverses a reverse FK plus an M2M
+    (`service_records__technicians`), and a vehicle with several matching
+    records would otherwise repeat once per record without `.distinct()`.
+    Still a plain field-name-string filter, so accounts stays free of a hard
+    dependency on fleet.models.
+    """
+    if user.is_technician:
+        return queryset.filter(service_records__technicians=user).distinct()
+    return queryset
+
+
 class VehicleTechnicianScopedQuerysetMixin:
     """Vehicle's sibling to TechnicianScopedQuerysetMixin above -- kept
     separate rather than folded in with a branch, because the two don't
@@ -83,24 +103,12 @@ class VehicleTechnicianScopedQuerysetMixin:
     direct `technicians` M2M field (ServiceRecord): `.filter(technicians=
     user)`, one hop, no row fan-out (ServiceAssignment's (service_record,
     technician) uniqueness means at most one matching through-row per
-    record).
-
-    Vehicle has no such field. A technician's claim on a vehicle is
-    inherited from every ServiceRecord ever raised against it, in ANY
-    status -- including COMPLETED, since past work is still their work --
-    so this has to traverse a reverse FK plus an M2M
-    (`service_records__technicians`), and a vehicle with several matching
-    records would otherwise repeat once per record without `.distinct()`.
-    Still a plain field-name-string filter, so accounts stays free of a
-    hard dependency on fleet.models.
+    record). Vehicle has no such field, hence the different shape --
+    see scope_vehicles_to_technician() above for why.
     """
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-        user = self.request.user
-        if user.is_technician:
-            return queryset.filter(service_records__technicians=user).distinct()
-        return queryset
+        return scope_vehicles_to_technician(super().get_queryset(), self.request.user)
 
 
 class VehicleManagerOrAssignedTechnicianMixin(LoginRequiredMixin):

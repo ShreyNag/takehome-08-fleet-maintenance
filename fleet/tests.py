@@ -1211,6 +1211,24 @@ class ServiceRecordListViewTests(TestCase):
         response = self._get(vehicle=self.vehicle_1.pk, status=ServiceRecord.Status.BOOKED)
         self.assertEqual(list(response.context["service_records"]), [self.record_3])
 
+    def test_technician_filter_dropdown_only_shows_their_own_vehicles(self):
+        # tech_a is assigned to record_1 (on vehicle_1) only -- vehicle_2
+        # never appears for them, even though it's a valid registration in
+        # the fleet, same rule VehicleListView already enforces (goal 5's
+        # scoping, decision #18) and the same shape as the booking-
+        # permission bug: a capability locked down on its named surface
+        # (the vehicle list) and left open on a sibling one (this dropdown).
+        self.client.force_login(self.tech_a)
+        response = self._get()
+        registrations = {v.registration_number for v in response.context["vehicles"]}
+        self.assertEqual(registrations, {"LIST-1"})
+
+    def test_manager_filter_dropdown_still_shows_every_vehicle(self):
+        self.client.force_login(self.manager)
+        response = self._get()
+        registrations = {v.registration_number for v in response.context["vehicles"]}
+        self.assertEqual(registrations, {"LIST-1", "LIST-2"})
+
     def test_sort_by_scheduled_date_both_directions(self):
         self.client.force_login(self.manager)
         response = self._get(status=ServiceRecord.Status.BOOKED, sort="scheduled_date", dir="asc")
