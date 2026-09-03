@@ -19,6 +19,9 @@
         <a class="nav-link{% if request.resolver_match.url_name == 'service-record-list' %} active{% endif %}" href="{% url 'service-record-list' %}">Service records</a>
         {% if user.is_fleet_manager %}
           <a class="nav-link{% if request.resolver_match.url_name == 'vehicle-odometer-import' %} active{% endif %}" href="{% url 'vehicle-odometer-import' %}">Import odometer readings</a>
+          <a class="nav-link{% if request.resolver_match.url_name == 'alert-list' %} active{% endif %}" href="{% url 'alert-list' %}">
+            Alerts{% if overdue_alert_count %} <span class="badge badge-alert-count">{{ overdue_alert_count }}</span>{% endif %}
+          </a>
         {% endif %}
       {% endif %}
     </div>

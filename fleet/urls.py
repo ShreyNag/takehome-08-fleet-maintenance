@@ -42,4 +42,6 @@ urlpatterns = [
         views.ServiceRecordUnassignTechnicianView.as_view(),
         name="service-record-unassign",
     ),
+    path("alerts/", views.AlertListView.as_view(), name="alert-list"),
+    path("alerts/<int:pk>/dismiss/", views.AlertDismissView.as_view(), name="alert-dismiss"),
 ]

@@ -617,6 +617,13 @@ td form {
   white-space: nowrap;
 }
 
+/* ---------- Alerts (goal 10) ---------- */
+
+.badge-alert-count {
+  background: var(--color-danger);
+  color: #fff;
+}
+
 /* ---------- Auth ---------- */
 
 .auth-card {

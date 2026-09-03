@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Alerts — FleetCare{% endblock %}
+
+{% block content %}
+  <h1>Alerts</h1>
+  <p>{{ alerts|length }} overdue service record{{ alerts|length|pluralize }} not yet dismissed.</p>
+
+  <div class="table-wrapper">
+  <table>
+    <thead>
+      <tr>
+        <th>Vehicle</th>
+        <th>Description</th>
+        <th>Due since</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for record in alerts %}
+        <tr>
+          <td><a href="{% url 'vehicle-detail' record.vehicle.pk %}">{{ record.vehicle }}</a></td>
+          <td><a href="{% url 'service-record-detail' record.pk %}">{{ record.description|truncatechars:60 }}</a></td>
+          <td class="overdue">{{ record.due_since|date:"Y-m-d H:i" }}</td>
+          <td>
+            <form method="post" action="{% url 'alert-dismiss' record.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="btn-link btn-secondary">Dismiss</button>
+            </form>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4"><em>No overdue alerts.</em></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% endblock %}

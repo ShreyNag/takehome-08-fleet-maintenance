@@ -12,10 +12,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from accounts.models import User
+from fleet.alerts import overdue_alerts
 from fleet.csv_io import MAX_IMPORT_ROWS
 from fleet.dashboard import dashboard_context
 from fleet.forms import ServiceRecordDescriptionForm, VehicleForm
 from fleet.models import (
+    AlertDismissal,
     ServiceAssignment,
     ServiceRecord,
     TimelineEvent,
@@ -984,15 +986,18 @@ class VehicleServiceStatusAnnotationTests(TestCase):
         self.assertEqual(status, Vehicle.ServiceStatus.OK.label)
 
     def test_query_count_does_not_grow_with_vehicle_count(self):
+        # 3 for the page itself (session, user, the annotated vehicle
+        # query) + 1 for goal 10's nav alert badge, forced on every manager
+        # page by the SimpleLazyObject in fleet.context_processors.alerts.
         for i in range(3):
             make_vehicle(registration_number=f"VSTATUS-N-{i}")
         self.client.force_login(self.manager)
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(4):
             self.client.get(reverse("vehicle-list"))
 
         for i in range(7):
             make_vehicle(registration_number=f"VSTATUS-N2-{i}")
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(4):
             self.client.get(reverse("vehicle-list"))
 
 
@@ -1167,14 +1172,19 @@ class ServiceRecordListViewTests(TestCase):
 
     def test_query_count_does_not_grow_with_result_count(self):
         self.client.force_login(self.manager)
-        with self.assertNumQueries(7):
+        # 7 for the page itself (session, user, pagination count, filter
+        # dropdown data, page of records + N+1-safe joins/prefetch) + 1 for
+        # goal 10's nav alert badge -- the manager nav always renders it, so
+        # the context processor's SimpleLazyObject count() gets forced on
+        # every manager page, not just the alerts page itself.
+        with self.assertNumQueries(8):
             self._get()
 
         for i in range(15):
             extra = make_record(self.vehicle_2, self.manager, status=ServiceRecord.Status.DUE, description=f"Extra {i}")
             ServiceAssignment.objects.create(service_record=extra, technician=self.tech_a, assigned_by=self.manager)
 
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(8):
             self._get()
 
 
@@ -1583,7 +1593,8 @@ class DashboardViewTests(TestCase):
 
     def test_query_count_is_fixed_regardless_of_fleet_size(self):
         # 2 (session, user) + 5 (dashboard_context()'s own aggregates -- see
-        # fleet/dashboard.py's module docstring for what each one is).
+        # fleet/dashboard.py's module docstring for what each one is) + 1
+        # (goal 10's nav alert badge, forced on every manager page).
         self.client.force_login(self.manager)
 
         def _make_fixture_data(prefix, n):
@@ -1592,11 +1603,189 @@ class DashboardViewTests(TestCase):
                 make_record(vehicle, self.manager, status=ServiceRecord.Status.DUE, due_since=timezone.now())
 
         _make_fixture_data("A", 3)
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(8):
             self.client.get(reverse("dashboard"))
 
         _make_fixture_data("B", 10)
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(8):
             self.client.get(reverse("dashboard"))
+
+
+class AlertListTests(TestCase):
+    """Goal 10: the alerts list is exactly overdue_alerts() -- overdue,
+    undismissed records -- and nothing a technician can reach."""
+
+    def setUp(self):
+        self.manager = make_user("alert-list-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.technician = make_user("alert-list-tech@example.com", User.Role.TECHNICIAN)
+        old_due_since = timezone.now() - timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS + 1)
+        self.overdue_record = make_record(
+            make_vehicle(registration_number="ALERT-OVERDUE"),
+            self.manager,
+            status=ServiceRecord.Status.DUE,
+            due_since=old_due_since,
+        )
+        self.fresh_due_record = make_record(
+            make_vehicle(registration_number="ALERT-FRESH"),
+            self.manager,
+            status=ServiceRecord.Status.DUE,
+            due_since=timezone.now(),
+        )
+        self.dismissed_record = make_record(
+            make_vehicle(registration_number="ALERT-DISMISSED"),
+            self.manager,
+            status=ServiceRecord.Status.DUE,
+            due_since=old_due_since,
+        )
+        AlertDismissal.objects.create(service_record=self.dismissed_record, dismissed_by=self.manager)
+
+    def test_list_view_matches_overdue_alerts_queryset_exactly(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("alert-list"))
+        expected = set(overdue_alerts().values_list("pk", flat=True))
+        actual = {record.pk for record in response.context["alerts"]}
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual, {self.overdue_record.pk})
+        self.assertNotIn(self.fresh_due_record.pk, actual)
+        self.assertNotIn(self.dismissed_record.pk, actual)
+
+    def test_technician_gets_403(self):
+        self.client.force_login(self.technician)
+        response = self.client.get(reverse("alert-list"))
+        self.assertEqual(response.status_code, 403)
+
+
+class AlertDismissTests(TestCase):
+    """Goal 10: dismissing is manager-only, POST-only, and removes the
+    record from both the list and the badge count."""
+
+    def setUp(self):
+        self.manager = make_user("alert-dismiss-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.technician = make_user("alert-dismiss-tech@example.com", User.Role.TECHNICIAN)
+        old_due_since = timezone.now() - timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS + 1)
+        self.record = make_record(
+            make_vehicle(registration_number="ALERT-DISMISS-1"),
+            self.manager,
+            status=ServiceRecord.Status.DUE,
+            due_since=old_due_since,
+        )
+
+    def test_dismiss_removes_from_list_and_badge_count(self):
+        self.client.force_login(self.manager)
+        self.assertEqual(overdue_alerts().count(), 1)
+
+        response = self.client.post(reverse("alert-dismiss", args=[self.record.pk]))
+        self.assertRedirects(response, reverse("alert-list"))
+
+        self.assertEqual(overdue_alerts().count(), 0)
+        self.assertTrue(
+            AlertDismissal.objects.filter(service_record=self.record, dismissed_by=self.manager).exists()
+        )
+
+    def test_dismiss_is_idempotent(self):
+        self.client.force_login(self.manager)
+        self.client.post(reverse("alert-dismiss", args=[self.record.pk]))
+        response = self.client.post(reverse("alert-dismiss", args=[self.record.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            AlertDismissal.objects.filter(service_record=self.record, dismissed_by=self.manager).count(), 1
+        )
+
+    def test_get_is_not_allowed(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("alert-dismiss", args=[self.record.pk]))
+        self.assertEqual(response.status_code, 405)
+
+    def test_technician_gets_403_and_writes_no_dismissal(self):
+        self.client.force_login(self.technician)
+        response = self.client.post(reverse("alert-dismiss", args=[self.record.pk]))
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(AlertDismissal.objects.filter(service_record=self.record).exists())
+
+
+class AlertReappearanceTests(TestCase):
+    """Goal 10's end-to-end reappearance rule: dismiss, complete the
+    service, cross the vehicle's next threshold, and a brand new alert
+    appears -- with no extra logic beyond what ensure_due_record and
+    AlertDismissal's record-level key already provide, because the
+    dismissal references a ServiceRecord that no longer represents the
+    vehicle's open work."""
+
+    def test_dismiss_complete_advance_reappears(self):
+        manager = make_user("reappear-mgr@example.com", User.Role.FLEET_MANAGER)
+        technician = make_user("reappear-tech@example.com", User.Role.TECHNICIAN)
+        vehicle = make_vehicle(
+            registration_number="REAPPEAR-1",
+            current_odometer=10_000,
+            service_interval_days=90,
+            service_interval_km=8_000,
+            next_due_date=timezone.localdate() - timedelta(days=1),
+            next_due_odometer=999_999,
+        )
+        old_due_since = timezone.now() - timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS + 1)
+        first_record = make_record(vehicle, manager, status=ServiceRecord.Status.DUE, due_since=old_due_since)
+
+        # Dismiss the overdue alert.
+        AlertDismissal.objects.create(service_record=first_record, dismissed_by=manager)
+        self.assertNotIn(first_record.pk, overdue_alerts().values_list("pk", flat=True))
+
+        # Complete it -- moves the record out of DUE and resets the
+        # vehicle's due counters from THIS completion's date/odometer
+        # (complete_service's own documented behaviour, not re-derived here).
+        book_service(first_record, scheduled_date=date.today(), technician=technician, actor=manager)
+        start_service(first_record, actor=manager)
+        complete_service(first_record, completed_odometer=vehicle.current_odometer, actor=manager)
+
+        # Advance the vehicle past its NEW threshold and re-derive due-ness
+        # through the same ensure_due_record() the app itself uses on an
+        # odometer edit or a check_due_vehicles run -- not a re-implementation.
+        vehicle.refresh_from_db()
+        vehicle.next_due_date = timezone.localdate() - timedelta(days=1)
+        vehicle.save(update_fields=["next_due_date"])
+        second_record = ensure_due_record(vehicle)
+
+        self.assertIsNotNone(second_record)
+        self.assertNotEqual(second_record.pk, first_record.pk)
+
+        # Back-date the new record past the grace period, same trick
+        # OverdueParityTests/EnsureDueRecordTests already use, so it's
+        # overdue immediately rather than waiting on real time to pass.
+        second_record.due_since = timezone.now() - timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS + 1)
+        second_record.save(update_fields=["due_since"])
+
+        alert_pks = set(overdue_alerts().values_list("pk", flat=True))
+        self.assertIn(second_record.pk, alert_pks)
+        self.assertNotIn(first_record.pk, alert_pks)
+
+
+class AlertBadgeContextProcessorTests(TestCase):
+    """Goal 10: the nav badge count is correct for a manager, zero for a
+    technician, and lazy -- a technician's page must not pay for the query
+    at all, since they never see the badge."""
+
+    def setUp(self):
+        self.manager = make_user("badge-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.technician = make_user("badge-tech@example.com", User.Role.TECHNICIAN)
+        old_due_since = timezone.now() - timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS + 1)
+        make_record(
+            make_vehicle(registration_number="BADGE-1"),
+            self.manager,
+            status=ServiceRecord.Status.DUE,
+            due_since=old_due_since,
+        )
+
+    def test_manager_sees_correct_count(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("vehicle-list"))
+        self.assertEqual(response.context["overdue_alert_count"], 1)
+        self.assertContains(response, "badge-alert-count")
+
+    def test_technician_count_is_zero_and_never_queried(self):
+        self.client.force_login(self.technician)
+        with patch("fleet.context_processors.overdue_alerts") as mock_overdue:
+            response = self.client.get(reverse("service-record-list"))
+        mock_overdue.assert_not_called()
+        self.assertEqual(response.context["overdue_alert_count"], 0)
+        self.assertNotContains(response, "badge-alert-count")
 
 

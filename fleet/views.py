@@ -15,6 +15,7 @@ from accounts.mixins import (
     VehicleTechnicianScopedQuerysetMixin,
 )
 from accounts.models import User
+from .alerts import overdue_alerts
 from .csv_io import CsvImportError, export_service_records_csv, import_odometer_readings
 from .dashboard import dashboard_context
 from .filters import SORT_FIELDS, filtered_service_records
@@ -27,7 +28,7 @@ from .forms import (
     TimelineNoteForm,
     VehicleForm,
 )
-from .models import ServiceRecord, TimelineEvent, Vehicle
+from .models import AlertDismissal, ServiceRecord, TimelineEvent, Vehicle
 from .services import (
     ALLOWED_TRANSITIONS,
     InvalidTransitionInput,
@@ -58,6 +59,38 @@ class DashboardView(FleetManagerRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         context.update(dashboard_context())
         return context
+
+
+class AlertListView(FleetManagerRequiredMixin, ListView):
+    """Goal 10: every currently-undismissed overdue record. Manager-only,
+    same as the dashboard -- alerts are a fleet-wide concern, not something
+    a technician's scoped view has any use for.
+    """
+
+    template_name = "fleet/alert_list.html"
+    context_object_name = "alerts"
+
+    def get_queryset(self):
+        return overdue_alerts()
+
+
+class AlertDismissView(FleetManagerRequiredMixin, SingleObjectMixin, View):
+    """POST-only (goal 10 says dismissal is a state change, consistent with
+    archive/restore -- decision #14). get_object() is deliberately NOT
+    scoped to overdue_alerts(): dismissing a record that's already been
+    completed or already dismissed by someone else should be a well-defined
+    no-op via get_or_create, not a 404, same reasoning as
+    VehicleArchiveView re-archiving an already-archived vehicle.
+    """
+
+    model = ServiceRecord
+    http_method_names = ["post"]
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        AlertDismissal.objects.get_or_create(service_record=self.object, dismissed_by=request.user)
+        messages.success(request, "Alert dismissed.")
+        return redirect("alert-list")
 
 
 class VehicleListView(VehicleTechnicianScopedQuerysetMixin, LoginRequiredMixin, ListView):
