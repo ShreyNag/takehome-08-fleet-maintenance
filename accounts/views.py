@@ -1,12 +1,5 @@
 from django.contrib.auth import views as auth_views
-from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
 from django.urls import reverse
-
-
-@login_required
-def dashboard(request):
-    return render(request, "dashboard.html")
 
 
 class FleetLoginView(auth_views.LoginView):

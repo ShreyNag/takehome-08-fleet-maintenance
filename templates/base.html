@@ -10,8 +10,11 @@
 <body>
   <nav>
     <div class="nav-section">
-      <a class="nav-brand" href="{% url 'dashboard' %}">FleetCare</a>
+      <a class="nav-brand" href="{% if user.is_authenticated and user.is_technician %}{% url 'service-record-list' %}{% else %}{% url 'dashboard' %}{% endif %}">FleetCare</a>
       {% if user.is_authenticated %}
+        {% if user.is_fleet_manager %}
+          <a class="nav-link{% if request.resolver_match.url_name == 'dashboard' %} active{% endif %}" href="{% url 'dashboard' %}">Dashboard</a>
+        {% endif %}
         <a class="nav-link{% if request.resolver_match.url_name == 'vehicle-list' %} active{% endif %}" href="{% url 'vehicle-list' %}">Vehicles</a>
         <a class="nav-link{% if request.resolver_match.url_name == 'service-record-list' %} active{% endif %}" href="{% url 'service-record-list' %}">Service records</a>
         {% if user.is_fleet_manager %}

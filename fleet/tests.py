@@ -13,8 +13,15 @@ from django.utils import timezone
 
 from accounts.models import User
 from fleet.csv_io import MAX_IMPORT_ROWS
+from fleet.dashboard import dashboard_context
 from fleet.forms import ServiceRecordDescriptionForm, VehicleForm
-from fleet.models import ServiceAssignment, ServiceRecord, TimelineEvent, TimelineImmutableError, Vehicle
+from fleet.models import (
+    ServiceAssignment,
+    ServiceRecord,
+    TimelineEvent,
+    TimelineImmutableError,
+    Vehicle,
+)
 from fleet.services import (
     ALLOWED_TRANSITIONS,
     InvalidTransition,
@@ -1407,3 +1414,189 @@ class ServiceRecordExportTests(TestCase):
         rows = self._rows(response)
         descriptions = {row[4] for row in rows[1:]}
         self.assertEqual(descriptions, {"Brake job"})
+
+
+class DashboardHeadlineNumberTests(TestCase):
+    """Goal 8's four headline numbers, each against known fixture data --
+    one vehicle per number so a wrong aggregate can't hide behind another
+    one happening to cancel it out."""
+
+    def setUp(self):
+        self.manager = make_user("dash-headline-mgr@example.com", User.Role.FLEET_MANAGER)
+
+    def test_headline_numbers_match_fixture_data(self):
+        due_vehicle = make_vehicle(
+            registration_number="DASH-DUE",
+            next_due_date=timezone.localdate(),
+            next_due_odometer=999_999,
+        )
+        make_record(due_vehicle, self.manager, status=ServiceRecord.Status.DUE, due_since=timezone.now())
+
+        # A DUE record that's also past its grace period is still, quite
+        # literally, DUE -- "overdue" is a subset of "due" (it's the aged
+        # slice of it), not a separate, mutually-exclusive bucket. So this
+        # vehicle counts toward BOTH due_vehicles and overdue_vehicles.
+        overdue_vehicle = make_vehicle(
+            registration_number="DASH-OVERDUE",
+            next_due_date=timezone.localdate() - timedelta(days=30),
+            next_due_odometer=999_999,
+        )
+        old_due_since = timezone.now() - timedelta(days=settings.SERVICE_GRACE_PERIOD_DAYS + 1)
+        make_record(overdue_vehicle, self.manager, status=ServiceRecord.Status.DUE, due_since=old_due_since)
+
+        in_service_vehicle = make_vehicle(registration_number="DASH-INSVC")
+        make_record(in_service_vehicle, self.manager, status=ServiceRecord.Status.IN_SERVICE)
+
+        completed_vehicle = make_vehicle(registration_number="DASH-COMPLETED")
+        make_record(
+            completed_vehicle,
+            self.manager,
+            status=ServiceRecord.Status.COMPLETED,
+            completed_at=timezone.now(),
+            completed_odometer=completed_vehicle.current_odometer,
+        )
+
+        # Present in the fleet but shouldn't move any of the four numbers.
+        make_vehicle(
+            registration_number="DASH-OK",
+            next_due_date=timezone.localdate() + timedelta(days=30),
+            next_due_odometer=999_999,
+        )
+        make_vehicle(registration_number="DASH-NEW")
+
+        context = dashboard_context()
+        self.assertEqual(context["due_vehicles"], 2)
+        self.assertEqual(context["overdue_vehicles"], 1)
+        self.assertEqual(context["in_service_vehicles"], 1)
+        self.assertEqual(context["completed_this_week"], 1)
+
+    def test_in_service_vehicle_is_not_also_counted_as_due(self):
+        # Regression coverage: with_service_status() alone can't tell
+        # BOOKED/IN_SERVICE apart from DUE (see dashboard.py's docstring),
+        # so an earlier version of this aggregate double-counted an
+        # in-service vehicle as also "due". due_vehicles and
+        # in_service_vehicles must partition, not overlap.
+        vehicle = make_vehicle(registration_number="DASH-PARTITION")
+        make_record(vehicle, self.manager, status=ServiceRecord.Status.IN_SERVICE)
+
+        context = dashboard_context()
+        self.assertEqual(context["due_vehicles"], 0)
+        self.assertEqual(context["in_service_vehicles"], 1)
+
+    def test_status_breakdown_counts_every_record_once(self):
+        vehicle = make_vehicle(registration_number="DASH-STATUS")
+        make_record(vehicle, self.manager, status=ServiceRecord.Status.DUE, due_since=timezone.now())
+        make_record(
+            make_vehicle(registration_number="DASH-STATUS-2"),
+            self.manager,
+            status=ServiceRecord.Status.BOOKED,
+            scheduled_date=timezone.localdate(),
+        )
+        counts = {row["status"]: row["count"] for row in dashboard_context()["status_breakdown"]}
+        self.assertEqual(counts.get(ServiceRecord.Status.DUE, 0), 1)
+        self.assertEqual(counts.get(ServiceRecord.Status.BOOKED, 0), 1)
+
+    def test_technician_breakdown_counts_assigned_records(self):
+        technician = make_user("dash-tech-breakdown@example.com", User.Role.TECHNICIAN)
+        vehicle = make_vehicle(registration_number="DASH-TECH")
+        record = make_record(vehicle, self.manager, status=ServiceRecord.Status.DUE, due_since=timezone.now())
+        assign_technician(record, technician, actor=self.manager)
+
+        breakdown = {row.pk: row.record_count for row in dashboard_context()["technician_breakdown"]}
+        self.assertEqual(breakdown[technician.pk], 1)
+
+
+class DashboardWeeklySeriesTests(TestCase):
+    """Goal 8: the 8-week chart series must show zero-completion weeks as
+    zero, not omit them -- a gap in the x-axis is a bug, per the brief."""
+
+    def setUp(self):
+        self.manager = make_user("dash-week-mgr@example.com", User.Role.FLEET_MANAGER)
+
+    def test_series_has_eight_weeks_with_zero_filled_gaps(self):
+        vehicle = make_vehicle(registration_number="DASH-WEEK")
+        make_record(
+            vehicle,
+            self.manager,
+            status=ServiceRecord.Status.COMPLETED,
+            completed_at=timezone.now(),
+            completed_odometer=vehicle.current_odometer,
+        )
+
+        weekly = dashboard_context()["weekly_series"]
+        self.assertEqual(len(weekly), 8)
+        non_zero_weeks = [week for week in weekly if week["count"] > 0]
+        self.assertEqual(len(non_zero_weeks), 1)
+        self.assertEqual(non_zero_weeks[0]["count"], 1)
+        # The one completion is dated "now", so it belongs in the last
+        # (current) bucket of the series, not a middle one.
+        self.assertEqual(weekly[-1]["count"], 1)
+        self.assertEqual(weekly[-1]["pct"], 100)
+
+    def test_series_is_all_zero_with_no_completions(self):
+        weekly = dashboard_context()["weekly_series"]
+        self.assertEqual(len(weekly), 8)
+        self.assertTrue(all(week["count"] == 0 for week in weekly))
+        self.assertTrue(all(week["pct"] == 0 for week in weekly))
+
+    def test_completion_eight_weeks_ago_still_falls_inside_the_window(self):
+        vehicle = make_vehicle(registration_number="DASH-WEEK-OLD")
+        # Computed the same way fleet.dashboard._weekly_completions derives
+        # its oldest bucket, rather than approximated with a raw timedelta
+        # -- a timedelta offset from "now" (which carries a time-of-day and
+        # isn't week-aligned) can land a day either side of the bucket
+        # boundary depending on what day the test happens to run.
+        today = timezone.localdate()
+        current_week_start = today - timedelta(days=today.weekday())
+        oldest_week_start = current_week_start - timedelta(weeks=7)
+        old_completion = timezone.make_aware(dt.datetime.combine(oldest_week_start, dt.time(hour=12)))
+        make_record(
+            vehicle,
+            self.manager,
+            status=ServiceRecord.Status.COMPLETED,
+            completed_at=old_completion,
+            completed_odometer=vehicle.current_odometer,
+        )
+        weekly = dashboard_context()["weekly_series"]
+        self.assertEqual(weekly[0]["count"], 1)
+        self.assertEqual(sum(week["count"] for week in weekly), 1)
+
+
+class DashboardViewTests(TestCase):
+    """Goal 8: manager-only, and a fixed query count that doesn't grow as
+    more widgets' worth of data exists -- assertNumQueries so a future
+    widget added without care is caught here, not in production."""
+
+    def setUp(self):
+        self.manager = make_user("dash-view-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.technician = make_user("dash-view-tech@example.com", User.Role.TECHNICIAN)
+
+    def test_technician_gets_403(self):
+        self.client.force_login(self.technician)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_manager_gets_200(self):
+        self.client.force_login(self.manager)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+
+    def test_query_count_is_fixed_regardless_of_fleet_size(self):
+        # 2 (session, user) + 5 (dashboard_context()'s own aggregates -- see
+        # fleet/dashboard.py's module docstring for what each one is).
+        self.client.force_login(self.manager)
+
+        def _make_fixture_data(prefix, n):
+            for i in range(n):
+                vehicle = make_vehicle(registration_number=f"DASH-QN-{prefix}-{i}")
+                make_record(vehicle, self.manager, status=ServiceRecord.Status.DUE, due_since=timezone.now())
+
+        _make_fixture_data("A", 3)
+        with self.assertNumQueries(7):
+            self.client.get(reverse("dashboard"))
+
+        _make_fixture_data("B", 10)
+        with self.assertNumQueries(7):
+            self.client.get(reverse("dashboard"))
+
+

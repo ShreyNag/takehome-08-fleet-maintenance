@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views import View
-from django.views.generic import CreateView, DetailView, ListView, UpdateView
+from django.views.generic import CreateView, DetailView, ListView, TemplateView, UpdateView
 from django.views.generic.detail import SingleObjectMixin
 
 from accounts.mixins import (
@@ -16,6 +16,7 @@ from accounts.mixins import (
 )
 from accounts.models import User
 from .csv_io import CsvImportError, export_service_records_csv, import_odometer_readings
+from .dashboard import dashboard_context
 from .filters import SORT_FIELDS, filtered_service_records
 from .forms import (
     AssignTechnicianForm,
@@ -38,6 +39,25 @@ from .services import (
     start_service,
     unassign_technician,
 )
+
+
+class DashboardView(FleetManagerRequiredMixin, TemplateView):
+    """Goal 8: the manager's landing page. Manager-only -- a technician's
+    landing page is ServiceRecordListView (goal 5); requesting this URL
+    directly gets the same 403 FleetManagerRequiredMixin gives every other
+    manager-only view, not a redirect (decision #16).
+
+    All the actual aggregation lives in fleet.dashboard.dashboard_context
+    so it can be unit-tested (query count included) without going through
+    a view/template at all.
+    """
+
+    template_name = "dashboard.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.update(dashboard_context())
+        return context
 
 
 class VehicleListView(VehicleTechnicianScopedQuerysetMixin, LoginRequiredMixin, ListView):

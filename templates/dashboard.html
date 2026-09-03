@@ -5,4 +5,79 @@
 {% block content %}
   <h1>Dashboard</h1>
   <p>Logged in as <strong>{{ user.email }}</strong>, role <strong>{{ user.get_role_display }}</strong>.</p>
+
+  <div class="stat-grid">
+    <div class="stat-card">
+      <span class="stat-value">{{ due_vehicles }}</span>
+      <span class="stat-label">Vehicles due for service</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">{{ in_service_vehicles }}</span>
+      <span class="stat-label">Vehicles currently in service</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">{{ completed_this_week }}</span>
+      <span class="stat-label">Services completed this week</span>
+    </div>
+    <div class="stat-card stat-card-overdue">
+      <span class="stat-value">{{ overdue_vehicles }}</span>
+      <span class="stat-label">Vehicles overdue for service</span>
+    </div>
+  </div>
+
+  <div class="dashboard-panels">
+    <section class="dashboard-panel">
+      <h2>Service records by status</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Status</th><th>Records</th></tr></thead>
+          <tbody>
+            {% for row in status_breakdown %}
+              <tr>
+                <td><span class="badge badge-rstatus-{{ row.status|lower }}">{{ row.label }}</span></td>
+                <td>{{ row.count }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="2">No service records yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="dashboard-panel">
+      <h2>Assigned records by technician</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Technician</th><th>Assigned records</th></tr></thead>
+          <tbody>
+            {% for technician in technician_breakdown %}
+              <tr>
+                <td>{{ technician }}</td>
+                <td>{{ technician.record_count }}</td>
+              </tr>
+            {% empty %}
+              <tr><td colspan="2">No technicians yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <section class="dashboard-panel">
+    <h2>Services completed per week (last 8 weeks)</h2>
+    {# CSS-only chart, per decision #17 -- no JS, no canvas, no chart library. #}
+    <div class="chart-weekly">
+      {% for week in weekly_series %}
+        <div class="chart-bar-col">
+          <span class="chart-count">{{ week.count }}</span>
+          <div class="chart-bar-track">
+            <div class="chart-bar" style="height: {{ week.pct }}%"></div>
+          </div>
+          <span class="chart-label">{{ week.label }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
 {% endblock %}

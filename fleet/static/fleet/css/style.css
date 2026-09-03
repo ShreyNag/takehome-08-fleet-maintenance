@@ -517,6 +517,106 @@ td form {
   margin-top: var(--space-1);
 }
 
+/* ---------- Dashboard (goal 8) ---------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.stat-card-overdue {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.stat-card-overdue .stat-value {
+  color: var(--color-danger);
+}
+
+.stat-label {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+
+.dashboard-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.dashboard-panel {
+  margin: 0 0 var(--space-5);
+}
+
+.dashboard-panel h2 {
+  font-size: 1rem;
+  margin: 0 0 var(--space-3);
+}
+
+/* CSS-only bar chart (decision #17: no JS, no canvas, no chart library).
+   Each week is a fixed-height track with a bar whose height is set inline
+   as a percentage of the tallest week in the window -- see
+   fleet/dashboard.py's `pct` computation. */
+.chart-weekly {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) 0 0;
+}
+
+.chart-bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1 1 0;
+  min-width: 2.5rem;
+}
+
+.chart-bar-track {
+  display: flex;
+  align-items: flex-end;
+  height: 8rem;
+  width: 100%;
+}
+
+.chart-bar {
+  width: 100%;
+  min-height: 2px;
+  background: var(--color-accent);
+  border-radius: 3px 3px 0 0;
+}
+
+.chart-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.chart-label {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
 /* ---------- Auth ---------- */
 
 .auth-card {
