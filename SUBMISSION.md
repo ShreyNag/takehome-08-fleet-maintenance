@@ -49,10 +49,6 @@ Mark each honestly. Partial is fine — say what is partial.
 
 | # | Goal | Status | Notes |
 |---|------|--------|-------|
-| 1 | | Done / Partial / Not done | |
-
-| # | Goal | Status | Notes |
-|---|------|--------|-------|
 | 1 | Accounts and roles | Done | Enforced server-side, asserted by tests (403, not hidden controls). Technicians scoped to their own records and the vehicles behind them. |
 | 2 | Vehicles | Done | Create, edit, archive, restore. Fleet list shows next-due date, next-due odometer and a service status computed as a SQL annotation. |
 | 3 | Service records | Done | Manager creates; assignee edits description only. Vehicle detail shows service history. |
