@@ -727,3 +727,57 @@ one code path for assignment — made this easier to reason about but did not
 prevent it, because the permission lived on the view rather than in the service
 function. A check inside `assign_technician` itself would have caught every
 caller. That is what I would change with more time.
+
+## 35. Scoping the filter dropdowns asymmetrically
+
+**Session 6, final review.**
+
+**Chose:** A technician's technician-filter dropdown lists only technicians who
+share a visible record with them. A manager's lists every technician account,
+unchanged. The vehicle dropdown is scoped the same way.
+**Rejected:** Scoping both roles identically.
+
+Found in a final review pass: `ServiceRecordListView` populated both filter
+dropdowns from unscoped querysets, while vehicles are carefully scoped
+everywhere else (decision #18). A technician saw every registration number and
+every technician's email in controls that could not have returned them a single
+extra row, since the underlying records are already restricted to their own
+assignments.
+
+The tidy fix — one scoping rule for both roles — has a cost. A technician with
+no assignments appears on no record, so they would silently vanish from a
+manager's dropdown, removing a filter that works today and answers a real
+question ("what is this person working on?" — nothing, which is worth being
+able to see). The two roles are asking different questions of the same control,
+so they get different lists.
+
+Raised by the coding tool rather than implemented unilaterally, on exactly that
+objection. Accepted.
+
+Same shape as #31: a capability enforced on its obvious surface and left open
+on a sibling nobody thought of as a scoping decision. Second instance of the
+pattern in one session.
+
+## 36. Rejecting scheduled dates in the past
+
+**Session 6.**
+
+**Chose:** `book_service` rejects a `scheduled_date` earlier than today, with
+today permitted.
+**Rejected:** No validation, and requiring a date strictly in the future.
+
+Not specified by the brief — goal 4 only says booking assigns a scheduled date
+and a technician. But a booking in the past is meaningless: booking is
+scheduling work that has not happened yet, and a past date distorts sorting by
+scheduled date and misrepresents the dashboard.
+
+Today is allowed deliberately. A manager booking a van in for this afternoon is
+ordinary, and forbidding it would reject the most common same-day case for no
+benefit.
+
+Enforced in the service layer, not only on the form, and raising the same
+exception type the other transition rules use. A form-only check would leave
+`book_service` callable with a past date from anywhere else, and every other
+rule about what a transition permits already lives in `services.py`. The form
+validation stays so the error appears inline rather than as a page-level
+message, but the service layer is the authority.
