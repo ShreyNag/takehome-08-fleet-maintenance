@@ -4,6 +4,9 @@
 
 {% block content %}
   <h1>Vehicles</h1>
+  {% if user.is_technician %}
+    <p class="page-intro">Vehicles you're currently or previously assigned a service record on.</p>
+  {% endif %}
 
   {% if user.is_fleet_manager %}
     <p class="actions">
@@ -47,9 +50,22 @@
           {% endif %}
         </tr>
       {% empty %}
-        <tr><td colspan="8">No vehicles yet.</td></tr>
+        <tr>
+          <td colspan="8">
+            {% if user.is_technician %}
+              <em>No vehicles assigned to you yet — one appears here as soon as a fleet manager books you onto a service record for it.</em>
+            {% else %}
+              <em>No vehicles yet — add one to get started.</em>
+            {% endif %}
+          </td>
+        </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
+  <p class="legend">
+    A vehicle is DUE once it reaches either its date or mileage service interval, and OVERDUE once that
+    due record has gone unbooked past the grace period. NOT YET SERVICED means it has no completed
+    service yet to measure from — anything else is OK.
+  </p>
 {% endblock %}

@@ -68,6 +68,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'fleet.context_processors.alerts',
+                'fleet.context_processors.service_grace_period',
             ],
         },
     },

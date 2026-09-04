@@ -4,6 +4,12 @@
 
 {% block content %}
   <h1>Service record</h1>
+  <ol class="lifecycle-steps">
+    <li class="lifecycle-step{% if service_record.status == "DUE" %} is-current{% endif %}">Due</li>
+    <li class="lifecycle-step{% if service_record.status == "BOOKED" %} is-current{% endif %}">Booked</li>
+    <li class="lifecycle-step{% if service_record.status == "IN_SERVICE" %} is-current{% endif %}">In service</li>
+    <li class="lifecycle-step{% if service_record.status == "COMPLETED" %} is-current{% endif %}">Completed</li>
+  </ol>
   <p>Vehicle: <a href="{% url 'vehicle-detail' service_record.vehicle.pk %}">{{ service_record.vehicle }}</a></p>
   <p>
     Status: <span class="badge badge-rstatus-{{ service_record.status|lower }}">{{ service_record.get_status_display }}</span>
@@ -34,7 +40,7 @@
         {% endif %}
       </li>
     {% empty %}
-      <li>No technicians assigned yet.</li>
+      <li>{% if assign_technician_form %}No technicians assigned yet — add one below.{% else %}No technicians assigned yet.{% endif %}</li>
     {% endfor %}
   </ul>
   {% if assign_technician_form %}

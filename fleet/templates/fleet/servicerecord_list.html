@@ -4,6 +4,9 @@
 
 {% block content %}
   <h1>Service records</h1>
+  {% if user.is_technician %}
+    <p class="page-intro">Your assigned service records, across every vehicle — use the filters below to narrow them down.</p>
+  {% endif %}
 
   <form method="get">
     <div class="filter-bar">
@@ -95,7 +98,17 @@
           <td>{{ record.updated_at|date:"Y-m-d H:i" }}</td>
         </tr>
       {% empty %}
-        <tr><td colspan="6"><em>No matching service records.</em></td></tr>
+        <tr>
+          <td colspan="6">
+            {% if request.GET.q or request.GET.vehicle or request.GET.status or request.GET.technician %}
+              <em>No records match these filters — try "Clear filters" above.</em>
+            {% elif user.is_technician %}
+              <em>Nothing assigned to you yet. Your work appears here once a fleet manager books a service record to you.</em>
+            {% else %}
+              <em>No service records in the system yet.</em>
+            {% endif %}
+          </td>
+        </tr>
       {% endfor %}
     </tbody>
   </table>

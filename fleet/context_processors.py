@@ -10,6 +10,7 @@ overdue_alerts().count()) only happens if a template actually reads
 page never pays for it.
 """
 
+from django.conf import settings
 from django.utils.functional import SimpleLazyObject
 
 from .alerts import overdue_alerts
@@ -23,3 +24,12 @@ def alerts(request):
         return overdue_alerts().count()
 
     return {"overdue_alert_count": SimpleLazyObject(count)}
+
+
+def service_grace_period(request):
+    """Makes the configured overdue grace period available to any template
+    that wants to explain it (fleet/alert_list.html), without hardcoding the
+    number there or wiring a one-off context variable through a specific
+    view -- a plain settings passthrough, same shape as `alerts` above.
+    """
+    return {"service_grace_period_days": settings.SERVICE_GRACE_PERIOD_DAYS}

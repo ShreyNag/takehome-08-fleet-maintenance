@@ -4,6 +4,10 @@
 
 {% block content %}
   <h1>Alerts</h1>
+  <p class="page-intro">
+    A Due record turns overdue once it has gone unbooked for more than {{ service_grace_period_days }}
+    day{{ service_grace_period_days|pluralize }}. Dismissing one clears it here until the vehicle comes due again.
+  </p>
   <p>{{ alerts|length }} overdue service record{{ alerts|length|pluralize }} not yet dismissed.</p>
 
   <div class="table-wrapper">

@@ -458,6 +458,57 @@ td form {
   font-weight: 700;
 }
 
+/* ---------- Guidance text (usability pass) ---------- */
+
+/* Short orienting copy at the top of a page or explaining an empty list --
+   presentation only, no new controls or data. */
+.page-intro {
+  color: var(--color-text-muted);
+  max-width: 40rem;
+}
+
+.legend {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  max-width: 40rem;
+}
+
+/* Service-record lifecycle breadcrumb (Due -> Booked -> In service ->
+   Completed) on the detail page -- a plain segmented row of labels, no
+   diagram, no JS (decision #17). */
+.lifecycle-steps {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-4);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.lifecycle-step {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  margin-left: -1px;
+}
+
+.lifecycle-step:first-child {
+  margin-left: 0;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.lifecycle-step:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.lifecycle-step.is-current {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
 /* ---------- Technician list ---------- */
 
 .technician-list {

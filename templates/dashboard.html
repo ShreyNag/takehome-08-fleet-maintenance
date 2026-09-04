@@ -4,6 +4,11 @@
 
 {% block content %}
   <h1>Dashboard</h1>
+  <p class="page-intro">
+    FleetCare replaces a shared spreadsheet for tracking fleet maintenance. A vehicle is flagged as due for
+    service once it reaches either its date interval or its mileage interval since the last service, whichever
+    comes first.
+  </p>
   <p>Logged in as <strong>{{ user.email }}</strong>, role <strong>{{ user.get_role_display }}</strong>.</p>
 
   <div class="stat-grid">
