@@ -1,7 +1,5 @@
 # Submission
 
-Fill this in and commit it. This is the first file we open.
-
 ## Links
 
 - **GitHub repository:** https://github.com/ShreyNag/takehome-08-fleet-maintenance
@@ -25,27 +23,37 @@ sleep.
 |------|-------|----------|
 | Fleet manager | manager@fleetcare.demo | demo-manager-pass1 |
 | Technician | tech@fleetcare.demo | demo-tech-pass1 |
+| Technician | t.alvarez@fleetcare.demo | demo-tech-pass1 |
+| Technician | t.chen@fleetcare.demo | demo-tech-pass1 |
+| Technician | t.diallo@fleetcare.demo | demo-tech-pass1 |
+| Technician | t.fitzgerald@fleetcare.demo | demo-tech-pass1 |
+| Technician | t.nakamura@fleetcare.demo | demo-tech-pass1 |
 
-Seeded on every deploy by `accounts/management/commands/seed_users.py`, run as
-the last step of `build.sh`. Demo-only credentials, deliberately committed so a
-reviewer can sign in without setup.
+Only the first two accounts are needed to see both roles. The remaining
+technicians are created by `seed_demo` so that assignment, the by-technician
+dashboard breakdown, and the technician filter have realistic spread — they
+are listed here in case a reviewer wants to check a specific name appearing in
+the seeded data.
+
+`manager@fleetcare.demo` and `tech@fleetcare.demo` are seeded on every deploy
+by `accounts/management/commands/seed_users.py`, run as the last step of
+`build.sh`. The five `t.*` technicians are created by
+`fleet/management/commands/seed_demo.py`, run by hand against the deployed
+database — it is deliberately not wired into `build.sh`, since it also
+rebuilds the demo fleet and history and isn't something every deploy should
+redo. Demo-only credentials, deliberately committed so a reviewer can sign in
+without setup.
 
 ## Stack
 
-| Layer | What you used | Why |
+| Layer | What I used | Why |
 |-------|---------------|-----|
 | Frontend | Django templates, minimal hand-written CSS | No separate SPA. Goal 6 requires search, filtering and pagination to happen server-side; with server-rendered templates that is structurally true rather than a claim to defend. Also removes CORS, token handling and a second deployment. |
-
 | Backend | Django 5.2 (LTS), Python 3.12 | Ships email/password auth, migrations, an admin for inspecting data, and pagination. On a lighter framework all four are hand-built, and none of that plumbing scores against the ten goals. |
-
 | Database | PostgreSQL on Neon | Postgres for real constraints and aggregate queries. Neon over Render's own free Postgres because Render's free databases expire 30 days after creation — a reviewer opening this five weeks from now would find the data gone. |
-
 | Hosting | Render web service, auto-deploying from `main` | Free tier, no card required, native Python support with a persistent process. Serverless hosts fit Django poorly: no long-lived process and no straightforward way to run `migrate` or seed commands. |
 
-
 ## Goal checklist
-
-Mark each honestly. Partial is fine — say what is partial.
 
 | # | Goal | Status | Notes |
 |---|------|--------|-------|
@@ -56,9 +64,9 @@ Mark each honestly. Partial is fine — say what is partial.
 | 5 | Assignment | Done | Managers add and remove technicians at any point; both write timeline events. Booking is manager-only, since it creates an assignment as a side effect. Technicians land on a cross-vehicle list of their own records. |
 | 6 | Finding service records | Done | Server-side search, filters, sorting and pagination with total match count. Sort parameter allowlisted. Query count asserted flat with result size. |
 | 7 | Bulk odometer CSV + history export | Done | Per-row report with six distinct rejection reasons; valid rows apply when others fail; each row in its own transaction. Successful updates trigger the due check. Streaming export sharing filter logic with the list view. |
-| 8 | Dashboard | Done | A complete dashboard visible from the manager's account showing the total vehicles due, currently being serviced, how many overdue and total vehicles completed that week |
+| 8 | Dashboard | Done | Headline numbers (due, in service, overdue, completed this week), plus a breakdown by status and by technician and an eight-week completions chart. The chart is a div-per-week bar chart in CSS, not a charting library. The whole thing runs a fixed 5 SQL queries regardless of fleet size, asserted by a test. |
 | 9 | Immutable history | Done | Every transition, assignment and note writes an event in the same transaction as the change. Append-only at save, delete and admin level. |
-| 10 | Overdue service alerts | Done | Overdue is now available as a queryset filter with an alerts area and a badge |
+| 10 | Overdue service alerts | Done | An alerts area lists overdue records with a nav badge count, and a manager can dismiss one. Dismissal is keyed to the service record, not the vehicle, so once that vehicle becomes due again a new record exists that no dismissal covers — the alert reappears with no extra logic needed. |
 
 ## How much time did you actually spend?
 
