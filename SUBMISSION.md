@@ -62,6 +62,34 @@ Mark each honestly. Partial is fine — say what is partial.
 
 ## How much time did you actually spend?
 
+Roughly 14 hours across six sessions, against the 12-hour guide.
+
+The split was uneven. Session 1 went mostly on deployment rather than code — getting a skeleton live on Render and Neon on day one, which cost more than expected but meant every later session pushed through a pipeline already known to work. Session 5 was the worst estimate: I planned three goals in one sitting and it ran to five commits and took the test suite from 56 to 127. It should have been two sessions.
+
+Session 6 lost time to things that were not code — a Render deploy that failed on transient port detection despite a successful build and a running server, and running the seed against Neon from my own machine because the free tier has no shell.
+
+Per-session estimates against actuals are in docs/plan.md.
+
 ## What would you do next, with another 12 hours?
 
+Move the timeline's immutability into the database. Right now TimelineEvent refuses updates and deletes in save(), delete(), the queryset and the admin — so no code path in the application can rewrite history, including a superuser. But the rule lives in Python. An operator with direct SQL access still could. A Postgres rule blocking UPDATE and DELETE on that table would make the guarantee real rather than conventional.
+
+Replace the due-check workaround with a real scheduler. The date threshold currently fires via a token-authenticated endpoint hit by an external cron, because Render's free tier has no worker process. It works, but it is a hosting workaround dressed as a feature. On a paid tier this is a scheduled management command and the endpoint goes away.
+
+Security settings I left off. SESSION_COOKIE_SECURE, CSRF_COOKIE_SECURE and HSTS are absent — the deployment relies entirely on Render terminating TLS, and Django never forces secure cookies itself. Fine for a demo, wrong for anything real, and I chose not to change deployment settings days before submitting on an app I had already verified.
+
+Postgres full-text search. Goal 6's description search is icontains, which cannot use an index. Correct at this scale and the first thing to degrade at 100x.
+
+Cost reporting per vehicle, as the stretch idea that fits the existing schema best — service records already carry dates and vehicles, so it is an aggregation rather than a new subsystem.
+
 ## What are you least happy with in this codebase, and why?
+
+The assignment permission, and specifically the reasoning that produced it rather than the bug itself.
+
+Goal 5 says only a fleet manager can add or remove a technician's assignment. I implemented that on the assign and unassign endpoints and wrote tests asserting a technician gets 403 on both, including the self-assignment case where they submit their own account. All of it passed while a technician could still create an assignment by booking a record, because booking assigns a technician as a side effect of a status transition and the word "assign" appears nowhere in it.
+
+I found it by clicking around as a technician and reading a timeline that showed DUE → BOOKED performed by a technician's account. My first fix was also wrong — I allowed a technician to book provided they assigned themselves, which is the same thing by another route and also lets a technician clear a manager's overdue alert by picking up work nobody scheduled. Booking is now manager-only outright.
+
+What bothers me is that a final review found the same shape again: the record list's technician and vehicle filter dropdowns were unscoped, while vehicles are carefully scoped everywhere else in the app. Twice in one project, and both times because I was asking "is this endpoint protected?" when the requirement was "can a technician cause this to happen, by any route?"
+
+The structural fix is to put the role check inside assign_technician itself, so every caller is covered regardless of which view reached it. I have the permission on the views, which is why a path that assigned without being named "assign" slipped through. That is what I would change first.

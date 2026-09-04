@@ -1,7 +1,7 @@
 node_modules/
 dist/
 build/
-.next/
+.next/s
 target/
 __pycache__/
 venv/
