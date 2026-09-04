@@ -450,6 +450,30 @@ class BookServiceInputTests(TestCase):
         self.assertEqual(self.record.status, ServiceRecord.Status.DUE)
         self.assertFalse(ServiceAssignment.objects.filter(service_record=self.record).exists())
 
+    def test_past_scheduled_date_is_rejected(self):
+        # Booking schedules future work -- a date that's already gone by
+        # is meaningless and would silently distort sorting by scheduled
+        # date and the dashboard.
+        yesterday = date.today() - timedelta(days=1)
+        with self.assertRaises(InvalidTransitionInput):
+            book_service(self.record, scheduled_date=yesterday, technician=self.technician, actor=self.manager)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.DUE)
+        self.assertFalse(ServiceAssignment.objects.filter(service_record=self.record).exists())
+        self.assertEqual(TimelineEvent.objects.filter(service_record=self.record).count(), 0)
+
+    def test_todays_date_is_accepted(self):
+        book_service(self.record, scheduled_date=date.today(), technician=self.technician, actor=self.manager)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.BOOKED)
+
+    def test_future_date_is_accepted(self):
+        tomorrow = date.today() + timedelta(days=1)
+        book_service(self.record, scheduled_date=tomorrow, technician=self.technician, actor=self.manager)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.BOOKED)
+        self.assertEqual(self.record.scheduled_date, tomorrow)
+
 
 class CompleteServiceDueResetTests(TestCase):
     """Goal 4: completion resets both counters from the completion's OWN
@@ -859,6 +883,18 @@ class TransitionViewPermissionTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.record.refresh_from_db()
         self.assertEqual(self.record.status, ServiceRecord.Status.BOOKED)
+
+    def test_manager_cannot_book_a_past_date(self):
+        yesterday = date.today() - timedelta(days=1)
+        self.client.force_login(self.manager)
+        response = self.client.post(
+            reverse("service-record-book", args=[self.record.pk]),
+            {"scheduled_date": yesterday, "technician": self.assigned.pk},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.status, ServiceRecord.Status.DUE)
+        self.assertIsNone(self.record.scheduled_date)
 
     def test_manager_can_book_a_different_technician_than_the_one_already_assigned(self):
         other_technician = make_user("tview-other2@example.com", User.Role.TECHNICIAN)

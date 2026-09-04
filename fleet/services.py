@@ -158,6 +158,10 @@ def book_service(record, scheduled_date, technician, actor):
         raise InvalidTransitionInput(
             "Booking requires both a scheduled date and a technician."
         )
+    if scheduled_date < timezone.localdate():
+        raise InvalidTransitionInput(
+            "Scheduled date cannot be in the past."
+        )
     with transaction.atomic():
         old_status = record.status
         record.status = ServiceRecord.Status.BOOKED

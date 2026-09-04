@@ -1,4 +1,5 @@
 from django import forms
+from django.utils import timezone
 
 from accounts.models import User
 from .models import ServiceRecord, Vehicle
@@ -49,6 +50,16 @@ class BookServiceForm(forms.Form):
         queryset=User.objects.filter(role=User.Role.TECHNICIAN),
         label="Assign technician",
     )
+
+    def clean_scheduled_date(self):
+        # Inline echo of the same rule book_service() enforces -- that
+        # function is still the authority (it's reachable from outside this
+        # form), but a manager who mistypes a date deserves the error next
+        # to the field rather than as a page-level message.
+        scheduled_date = self.cleaned_data["scheduled_date"]
+        if scheduled_date < timezone.localdate():
+            raise forms.ValidationError("Scheduled date cannot be in the past.")
+        return scheduled_date
 
 
 class CompleteServiceForm(forms.Form):
