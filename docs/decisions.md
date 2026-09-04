@@ -1,12 +1,5 @@
 # Decisions
 
-Log the decisions that actually shaped this codebase — the ones where a real alternative existed and
-you picked one. At least five entries. For each: what you chose, what you rejected, and why. At least
-one entry must be a decision you later reversed — say what changed your mind. It can be any entry
-below, not necessarily the last one; add a **Later reversed:** line to whichever one it is.
-
-# Decisions
-
 ## 1. Django over FastAPI
 
 **Chose:** Django 5.2 with server-rendered templates.
@@ -70,6 +63,9 @@ gets clicked.
 **Originally chose:** Run `python manage.py seed_users` manually on Render
 after the first deploy.
 **Reversed to:** Run it as the final step of `build.sh`, on every deploy.
+**Later reversed:** Render's free tier has no shell access — that's a paid
+feature — so the manual step the original plan depended on could never
+actually be run.
 
 The original plan assumed shell access. Render's free tier doesn't have it —
 that's a paid feature. Since `seed_users` was already written with
@@ -103,37 +99,33 @@ environment variables and appears in the repo only as named placeholders in
 **Session 2.**
 
 **Chose:** `next_due_date` and `next_due_odometer` as indexed columns on
-`Vehicle`, recalculated by `complete_service()` whenever a service completes.
-**Rejected:** Computing due-ness on read from the last completed service plus
+`Vehicle`, recalculated by `complete_service()` on every completion.
+**Rejected:** Computing due-ness on read, from the last completed service plus
 the intervals.
 
-Computing is simpler and cannot drift. But goal 6 requires server-side
-filtering, sorting and pagination with a total count, and goal 8 requires
-aggregate counts of vehicles due and overdue. Both need due-ness to exist in
-SQL. As a Python property it becomes a full table scan and a loop, and
-Django's `Paginator` cannot produce a total without materialising every row —
-which is exactly the "load everything into the browser" pattern goal 6
-forbids, moved one layer down.
+Computing is simpler and cannot drift, but goal 6 needs server-side filtering,
+sorting and pagination with a total count, and goal 8 needs aggregate
+due/overdue counts — both require due-ness to exist in SQL. As a Python
+property it's a full table scan, and `Paginator` can't total without
+materialising every row: exactly the "load everything into the browser"
+pattern goal 6 forbids, one layer down.
 
-The accepted cost is that these columns can drift from the truth. The
-mitigation is confining writes to exactly one code path, `complete_service()`,
-stated as an invariant in the model docstring. An odometer update reads these
-fields — `ensure_due_record()` checks whether the new reading has crossed an
-existing threshold — but never writes them: the thresholds are anchored to
-the last completed service, not to odometer edits in between, so there's
-nothing for an odometer edit to recompute.
+The cost is that these columns can drift from the truth. The mitigation is one
+write path, `complete_service()`, stated as an invariant in the model
+docstring. An odometer update reads these fields — `ensure_due_record()`
+checks whether a reading crossed the existing threshold — but never writes
+them: the thresholds are anchored to the last completed service, not to
+odometer edits in between.
 
-**Correction, final review:** this was documented — here, in
+**Correction, final review:** this invariant was documented — here, in
 `architecture.md`, in `schema.md`, and in the `Vehicle` docstring — as TWO
-write paths, "completing a service and updating an odometer reading," from
-session 2 onward. That was never true; only `complete_service()` ever wrote
-these fields. Caught and corrected against the actual code in a final review
-rather than silently fixed — a documented invariant that was never true is
-worth showing, not just quietly overwriting.
+write paths, completion and odometer update, from session 2 onward. Never
+true; only `complete_service()` ever wrote these fields. Caught against the
+actual code in a final review and corrected rather than silently fixed — a
+documented invariant that was never true is worth showing.
 
-This is the decision I would most expect to be challenged on, and the one I
-would revisit first if the app were read-light and write-heavy rather than the
-reverse.
+The decision I'd most expect to be challenged on, and the one I'd revisit
+first if this app were read-light and write-heavy instead.
 
 ## 8. The whole schema in one pass, before any views
 
@@ -754,7 +746,7 @@ so they get different lists.
 Raised by the coding tool rather than implemented unilaterally, on exactly that
 objection. Accepted.
 
-Same shape as #31: a capability enforced on its obvious surface and left open
+Same shape as #34: a capability enforced on its obvious surface and left open
 on a sibling nobody thought of as a scoping decision. Second instance of the
 pattern in one session.
 
