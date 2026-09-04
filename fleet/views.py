@@ -24,7 +24,7 @@ from accounts.models import User
 from .alerts import overdue_alerts
 from .csv_io import CsvImportError, export_service_records_csv, import_odometer_readings
 from .dashboard import dashboard_context
-from .filters import SORT_FIELDS, filtered_service_records
+from .filters import SORT_FIELDS, filtered_service_records, scoped_service_records
 from .forms import (
     AssignTechnicianForm,
     BookServiceForm,
@@ -640,7 +640,28 @@ class ServiceRecordListView(LoginRequiredMixin, ListView):
         context["vehicles"] = scope_vehicles_to_technician(
             Vehicle.all_objects.order_by("registration_number"), self.request.user
         )
-        context["technicians"] = User.objects.filter(role=User.Role.TECHNICIAN)
+        # A technician's "Technician" filter dropdown is scoped the same
+        # way the "Vehicle" one above is: to technicians who share at
+        # least one visible record with the viewer. Every other technician
+        # option would filter to a guaranteed-empty result, since the
+        # record list is already scoped to the viewer's own assignments --
+        # so any record that qualifies a technician also has the viewer on
+        # it, which is why this reuses scoped_service_records(user) rather
+        # than a manager-only-looking `technicians=user` filter that could
+        # be misread as excluding the viewer.
+        #
+        # The manager's dropdown stays unscoped: every record is already
+        # visible to a manager, so filtering technicians by "shares a
+        # visible record" would just be "has at least one assignment" --
+        # silently dropping a technician with zero assignments from a
+        # filter that currently lists (and can correctly select) them.
+        if self.request.user.is_technician:
+            context["technicians"] = User.objects.filter(
+                role=User.Role.TECHNICIAN,
+                assigned_service_records__in=scoped_service_records(self.request.user),
+            ).distinct()
+        else:
+            context["technicians"] = User.objects.filter(role=User.Role.TECHNICIAN)
         context["statuses"] = ServiceRecord.Status.choices
         return context
 

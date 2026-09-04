@@ -1229,6 +1229,31 @@ class ServiceRecordListViewTests(TestCase):
         registrations = {v.registration_number for v in response.context["vehicles"]}
         self.assertEqual(registrations, {"LIST-1", "LIST-2"})
 
+    def test_technician_technicians_dropdown_only_shows_technicians_they_share_a_record_with(self):
+        # tech_a starts out sharing no record with tech_b (record_1 vs.
+        # record_2). Adding tech_a onto record_2 alongside tech_b makes
+        # tech_b visible in tech_a's dropdown -- but tech_c, who shares no
+        # record with tech_a at all, must not appear even though they're a
+        # valid technician account, same "would filter to nothing" reasoning
+        # as the vehicle dropdown above.
+        ServiceAssignment.objects.create(service_record=self.record_2, technician=self.tech_a, assigned_by=self.manager)
+        tech_c = make_user("list-tech-c@example.com", User.Role.TECHNICIAN)
+        self.client.force_login(self.tech_a)
+        response = self._get()
+        emails = {t.email for t in response.context["technicians"]}
+        self.assertEqual(emails, {self.tech_a.email, self.tech_b.email})
+        self.assertNotIn(tech_c.email, emails)
+
+    def test_manager_technicians_dropdown_still_shows_every_technician(self):
+        # Includes a technician with zero assignments -- the manager's
+        # dropdown must not drop them just because they'd never show up in
+        # a "shares a record with the viewer" style scoping.
+        idle_tech = make_user("list-tech-idle@example.com", User.Role.TECHNICIAN)
+        self.client.force_login(self.manager)
+        response = self._get()
+        emails = {t.email for t in response.context["technicians"]}
+        self.assertEqual(emails, {self.tech_a.email, self.tech_b.email, idle_tech.email})
+
     def test_sort_by_scheduled_date_both_directions(self):
         self.client.force_login(self.manager)
         response = self._get(status=ServiceRecord.Status.BOOKED, sort="scheduled_date", dir="asc")
