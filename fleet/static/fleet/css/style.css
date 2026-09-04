@@ -475,7 +475,7 @@ td form {
 
 /* Service-record lifecycle breadcrumb (Due -> Booked -> In service ->
    Completed) on the detail page -- a plain segmented row of labels, no
-   diagram, no JS (decision #17). */
+   diagram, no JS (decision #11). */
 .lifecycle-steps {
   display: flex;
   flex-wrap: wrap;
@@ -634,7 +634,7 @@ td form {
   margin: 0 0 var(--space-3);
 }
 
-/* CSS-only bar chart (decision #17: no JS, no canvas, no chart library).
+/* CSS-only bar chart (decision #11: no JS, no canvas, no chart library).
    Each week is a fixed-height track with a bar whose height is set inline
    as a percentage of the tallest week in the window -- see
    fleet/dashboard.py's `pct` computation. */

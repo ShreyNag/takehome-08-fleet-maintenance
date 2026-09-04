@@ -33,21 +33,7 @@ The ordering mattered more than the choice. Django cannot swap
 `AUTH_USER_MODEL` after the initial migration without resetting the database,
 so this was deliberately the first commit that touched models.
 
-## 3. django-environ alone, dropping dj-database-url and python-dotenv
-
-**Chose:** `django-environ` for all configuration.
-**Rejected:** The conventional trio of `python-dotenv` for `.env` files,
-`dj-database-url` for parsing `DATABASE_URL`, and `os.environ` for the rest.
-
-`django-environ` already reads `.env` files, parses a Postgres connection URL
-into Django's nested `DATABASES` dict via `env.db()`, and casts booleans and
-lists. The other two libraries would have added nothing but two more
-dependencies to pin and explain.
-
-Settings fall back to local SQLite when `DATABASE_URL` is unset, so the
-project runs with no configuration at all on a fresh clone.
-
-## 4. Neon for Postgres rather than Render's own free database
+## 3. Neon for Postgres rather than Render's own free database
 
 **Chose:** Web service on Render, database on Neon.
 **Rejected:** Both on Render.
@@ -58,7 +44,7 @@ free tier has no such expiry. The cost is a second provider and a connection
 string to manage; the benefit is that the live URL still works whenever it
 gets clicked.
 
-## 5. Seeding from build.sh — reversed
+## 4. Seeding from build.sh — reversed
 
 **Originally chose:** Run `python manage.py seed_users` manually on Render
 after the first deploy.
@@ -81,20 +67,7 @@ ran it. Fix: call `seed_users` after `migrate` as the last line of
 `build.sh`, so seeding happens automatically on every deploy instead of
 depending on a manual step reviewers have no reason to know about.
 
-## 6. Committing demo credentials to a public repository
-
-**Chose:** Demo passwords in `SUBMISSION.md` and in `seed_users.py`.
-**Rejected:** Credentials supplied privately.
-
-The brief requires demo credentials for every role recorded in
-`SUBMISSION.md`, so this is a deliberate exception to keeping secrets out of
-the repository, not an oversight. These passwords exist only on a demo
-deployment holding fictional data and are used nowhere else. Everything with
-real consequence — `SECRET_KEY`, the Neon connection string — lives in Render
-environment variables and appears in the repo only as named placeholders in
-`.env.example`.
-
-## 7. Storing next-due values on the vehicle rather than computing them
+## 5. Storing next-due values on the vehicle rather than computing them
 
 **Session 2.**
 
@@ -127,7 +100,7 @@ documented invariant that was never true is worth showing.
 The decision I'd most expect to be challenged on, and the one I'd revisit
 first if this app were read-light and write-heavy instead.
 
-## 8. The whole schema in one pass, before any views
+## 6. The whole schema in one pass, before any views
 
 **Session 2.**
 
@@ -145,7 +118,7 @@ The risk is designing for requirements I have not built yet and getting them
 wrong. Accepted because the brief specifies all ten goals up front, so the
 requirements are known rather than speculative.
 
-## 9. Assignment as an explicit through-model
+## 7. Assignment as an explicit through-model
 
 **Session 2.**
 
@@ -158,7 +131,7 @@ the timeline with an actor, so the metadata has to live somewhere. Declaring
 the through-model up front avoids a later migration converting the implicit
 table into an explicit one.
 
-## 10. Enforcing immutability in code, not by convention
+## 8. Enforcing immutability in code, not by convention
 
 **Session 2.**
 
@@ -177,7 +150,19 @@ rewriting history.
 Visible in the admin index: Timeline events shows "View" where every other
 model shows "Change".
 
-## 11. A separate env-driven admin account rather than promoting the demo manager
+**Tested by the rule itself, session 6:** clearing leftover test vehicles
+before seeding demo data meant cascading deletes through their service
+records into timeline events, which the model correctly refused. Archived
+those vehicles instead — goal 2's retirement mechanism — rather than deleting
+via raw SQL to route around the guarantee.
+
+Worth being precise about what the rule does and does not promise: no code
+path in the application can rewrite history, including a superuser through
+the admin. An operator with direct SQL access still can. A database-level
+constraint would close that, and is the first thing I would add if this were
+production.
+
+## 9. A separate env-driven admin account rather than promoting the demo manager
 
 **Session 2.**
 
@@ -193,43 +178,7 @@ separate means `manager@fleetcare.demo` is rejected at `/admin/`, which is
 itself evidence that application roles and Django staff permissions are
 distinct concerns.
 
-## 12. Verifying against the right surface
-
-**Sessions 1 and 2.** Not a design decision, but a working practice I changed
-after making the same mistake twice.
-
-In session 1, Render reported a successful deploy while `seed_users` had
-failed silently, and the only symptom was a login rejecting valid credentials.
-In session 2, I loaded the live URL expecting to see changes, saw none, and
-assumed the migration had failed — I had committed locally but not pushed, so
-Render had nothing new to deploy. Session 2 also shipped no UI at all, so even
-after pushing, the front page was never going to look different.
-
-Both are the same error: trusting a proxy signal instead of the thing itself.
-A green deploy badge is not a working app, and an unchanged page is not
-evidence of an unchanged database. From session 3 onward I verify by querying
-Neon or opening the admin, and I develop against a local SQLite server rather
-than round-tripping through Render.
-
-**Third instance, session 4:** an empty `manage.py shell` query read as broken
-lifecycle logic, when the shell was on local SQLite and the data was in Neon.
-The pattern is consistent enough now to be a working practice rather than three
-mishaps: before concluding anything is broken, confirm which surface is being
-read. Sessions 5 and 6 are developed entirely locally so the browser, the
-shell and the tests all agree.
-
-**Fourth instance, session 5:** I reported a bug — a technician could not see a
-record assigned to them — and asked for a fix. The diagnosis came back
-category 4 of the four possibilities the prompt listed: nothing was broken. The
-record was reachable directly; there was simply no cross-vehicle list surfacing
-it yet, which was the next thing being built. Same shape as the other three:
-an absent surface read as broken logic.
-
-Worth recording that the prompt asking it to *diagnose before fixing*, with an
-explicit "if it is this, say so and stop," is what prevented it from
-manufacturing a fix for a bug that did not exist.
-
-## 13. Keeping derived and lifecycle fields off every form
+## 10. Keeping derived and lifecycle fields off every form
 
 **Session 3.**
 
@@ -240,7 +189,7 @@ expose description only — never `status`, `due_since`, `scheduled_date`,
 **Rejected:** Including them and relying on validation, or on managers simply
 not editing them.
 
-Decision #7 established that the next-due columns are denormalised and safe
+Decision #5 established that the next-due columns are denormalised and safe
 only because exactly one code path writes them. A form field would be a
 second one. Leaving these off the form isn't a UI choice, it's how that
 invariant survives contact with a UI built two sessions before the service
@@ -253,56 +202,7 @@ before it's even written.
 
 `status` and `due_since` are set in `form_valid`, not by the user.
 
-## 14. Archive and restore as POST, not GET
-
-**Session 3.**
-
-**Chose:** Archiving and restoring are POST-only views behind a small form with
-a button.
-**Rejected:** A link to `/vehicles/3/archive/`, which is less code.
-
-A GET request that changes state is wrong in a way that has practical
-consequences rather than only theoretical ones: it bypasses CSRF protection, it
-can be triggered by anything that prefetches or crawls links, and it's
-replayable from browser history. The codebase was already consistent about this
-— logout was built as a POST form in session 1 for the same reason, since
-Django 4.1 rejects GET logout outright.
-
-## 15. Role gating by action, not by page
-
-**Session 3.**
-
-**Chose:** Both roles can see the vehicle list and detail pages. Only managers
-get create, edit, archive and restore. Technicians see records only where they
-are assigned.
-**Rejected:** Blanket-gating the whole vehicles area to managers.
-
-Goal 1 restricts what technicians can *do* — create vehicles, change intervals,
-reassign records — not what they can see of the fleet. A technician who can't
-look up a vehicle can't sensibly work on it. Gating per action rather than per
-page keeps the rule aligned with the brief rather than with whatever was
-simplest to implement.
-
-Enforcement is in the view via the session 2 mixins. Templates also hide
-controls the user can't use, but that is cosmetic — the tests assert a 403 from
-the server, since goal 1 says the difference must hold there and not only in
-the interface.
-
-## 16. 403 rather than redirect on unauthorised access
-
-**Session 3.**
-
-**Chose:** An authenticated user attempting an action their role forbids gets
-403 Forbidden.
-**Rejected:** Redirecting to the login page or silently back to the list.
-
-Redirecting conflates two different failures. Not being logged in is 401-shaped
-and a redirect is the right response. Being logged in as the wrong role is a
-permission failure, and bouncing the user to a login form they're already past
-is confusing and makes the tests weaker — a redirect assertion doesn't
-distinguish "correctly refused" from "quietly did nothing".
-
-## 17. No CSS framework, no JavaScript
+## 11. No CSS framework, no JavaScript
 
 **Session 3.**
 
@@ -314,16 +214,21 @@ The brief is explicit that no stack scores better than another and that time
 spent on things outside the ten goals will show. Goals 4, 7, 8 and 10 are the
 hard ones and they're all server-side. Styling buys nothing here.
 
-The visible cost is that the app is plain. The accepted risk is that the
-dashboard in goal 8 needs a chart, which will require one small JavaScript
-dependency — that will be a deliberate, single exception rather than a
-framework adopted up front.
+The visible cost is that the app is plain. The accepted risk was that the
+dashboard in goal 8 would need a chart, which looked like it would force one
+small JavaScript dependency as a deliberate, single exception.
 
-## 18. Scoping vehicles to technicians — reversing #15
+**Session 6:** it didn't. Goal 8's eight-week chart turned out to be a div per
+week with height scaled as a percentage of the maximum — plain CSS, not
+Chart.js from a CDN. Weeks with zero completions still render as empty
+columns, so a missing week reads as a bug rather than a tidy axis. The
+predicted exception never had to be spent.
+
+## 12. Scoping vehicles to technicians — a reversal
 
 **Session 4.**
 
-**Originally chose (#15):** Both roles see the whole fleet. Goal 1 restricts
+**Originally chose:** Both roles see the whole fleet. Goal 1 restricts
 what technicians can *do*, not what they can see, so gating the vehicle list
 looked like inventing a rule the brief hadn't asked for.
 
@@ -348,7 +253,7 @@ not exist" and makes the test weaker.
 cross-vehicle record list gives them a proper home screen. Acceptable, because
 that list is the view they should be starting from anyway.
 
-## 19. Sibling mixins rather than one mixin with a branch
+## 13. Sibling mixins rather than one mixin with a branch
 
 **Session 4.**
 
@@ -373,7 +278,7 @@ one mixin "if it fits, or a sibling if forcing them together makes both
 worse." I asked for the reasoning before implementation and accepted it on the
 `.distinct()` argument.
 
-## 20. Service status as a SQL annotation, not a model property
+## 14. Service status as a SQL annotation, not a model property
 
 **Session 4.**
 
@@ -384,7 +289,7 @@ worse." I asked for the reasoning before implementation and accepted it on the
 A property is simpler and produces an N+1 — one query per vehicle on the fleet
 list, and the same again on the dashboard. Worse, it can't be filtered,
 sorted or counted, which goals 6 and 8 both require. This is the same argument
-as decision #7: due-ness has to exist in SQL, not only in Python.
+as decision #5: due-ness has to exist in SQL, not only in Python.
 
 `Exists()` subqueries rather than joins, so the query count stays flat
 regardless of fleet size, and the annotation can't interact badly with the
@@ -399,23 +304,7 @@ third copy is how those quietly diverge.
 Case ordering matters: OVERDUE is tested before DUE, since an overdue record
 is also an open one and `Case` returns on first match.
 
-## 21. "Not yet serviced" as a distinct state
-
-**Session 4.**
-
-**Chose:** Four labels — OVERDUE, DUE, NOT YET SERVICED, OK.
-**Rejected:** Three, folding never-serviced vehicles into OK.
-
-A vehicle with null next-due values has never been serviced, so nothing is
-watching it. Labelling that OK would be actively misleading — it reads as
-"nothing needed" when it means "no baseline exists yet."
-
-This surfaces the consequence of the session 4 call that a brand-new vehicle
-is not immediately due. That decision is defensible, but it means every new
-vehicle needs one manually created service record before automatic tracking
-begins, and the fleet list now makes that visible rather than silent.
-
-## 22. Three modules, not one service layer
+## 15. Three modules, not one service layer
 
 **Session 5.**
 
@@ -435,12 +324,23 @@ header detection, six rejection paths — and would have doubled the length of
 the active filters, and goal 6 requires the list view to apply them. One module
 used by both means the two cannot drift. Two copies of the same filter logic is
 a bug waiting to be reported as "the export doesn't match what I was looking
-at."
+at." The sort parameter it exposes is validated against an allowlist before
+reaching `order_by()` — passing an arbitrary column name through is an
+injection surface — one check shared by both call sites rather than two.
 
 Proposed by the coding tool in response to a prompt that left the structure
 open. Accepted on the drift argument.
 
-## 23. Writing the assignment event on booking
+**Session 6:** two more read-only modules followed the same split-by-concern
+rule — `dashboard.py` for goal 8's aggregation, `alerts.py` for goal 10's
+overdue-and-undismissed queryset. Both are read-only like `filters.py`, but
+neither is "scope/filter/sort the record list," so they earned their own
+files rather than being folded in. `alerts.py` especially: it's called from
+three places (the nav badge, the alerts view, dismiss's own re-check), so one
+function is what keeps those three from drifting on what "currently an alert"
+means.
+
+## 16. Writing the assignment event on booking
 
 **Session 5.**
 
@@ -464,27 +364,7 @@ assignment existed as a first-class action; changing a test because
 requirements grew is legitimate, suppressing an audit event to keep a test green
 is not.
 
-## 24. Sort fallback that tells the user
-
-**Session 5.**
-
-**Chose:** An unrecognised sort parameter falls back to the default AND
-surfaces a message saying the sort was ignored.
-**Rejected:** Silent fallback.
-
-The tool proposed silent. It doesn't break anything, but a user clicking a
-column header and getting an unsorted-looking page has no way to know why.
-
-More importantly it is inconsistent with the codebase: goal 4's illegal
-transitions were deliberately built to reject *with a message explaining why*,
-rather than failing quietly. The same principle applies to any input the server
-declines to honour.
-
-The sort parameter is still validated against an allowlist before reaching
-`order_by` — passing an arbitrary column name through is an injection surface,
-and that check is independent of whether the user is told.
-
-## 25. `icontains` over Postgres full-text search
+## 17. `icontains` over Postgres full-text search
 
 **Session 5.**
 
@@ -499,7 +379,7 @@ vector, and a different query API — time better spent on goals 8 and 10.
 Recorded in a comment at the call site as the fix if it ever gets slow, and in
 `schema.md` as the second thing that breaks at 100x.
 
-## 26. "Due" and "in service" read off ServiceRecord.status, not off with_service_status()
+## 18. "Due" and "in service" read off ServiceRecord.status, not off with_service_status()
 
 **Session 6.**
 
@@ -508,7 +388,7 @@ Recorded in a comment at the call site as the fix if it ever gets slow, and in
 **Rejected:** Reading both off `VehicleQuerySet.with_service_status()`, since the brief calls for
 reusing that annotation.
 
-`with_service_status()` (decision #20) only distinguishes OVERDUE from "any other open record" —
+`with_service_status()` (decision #14) only distinguishes OVERDUE from "any other open record" —
 BOOKED and IN_SERVICE both fall under its DUE label, because the vehicle-list badge it was built
 for never needed to tell them apart. Reusing it for the "due" headline would have silently
 double-counted an in-service vehicle as also due. `with_service_status()` is still reused, just for
@@ -518,25 +398,7 @@ where the alternative really would be re-deriving the grace-period comparison.
 Verified with a regression test (`test_in_service_vehicle_is_not_also_counted_as_due`) after an
 earlier draft caught exactly this double-count against fixture data.
 
-## 27. Two new read-only modules, not more of services.py or filters.py
-
-**Session 6.**
-
-**Chose:** `fleet/dashboard.py` (goal 8's aggregation) and `fleet/alerts.py` (goal 10's
-overdue-and-undismissed queryset), each with one function, imported by the views.
-**Rejected:** Folding dashboard aggregation into `filters.py` (closest existing read-side module),
-or into `services.py`.
-
-Decision #22's split was by concern: `services.py` is lifecycle *mutation*, `filters.py` is
-scoping/search/sort for one specific list. Goal 8's aggregation and goal 10's alert query are
-read-only like `filters.py`, but neither *is* "scope/filter/sort the record list" — forcing them in
-there would be the same "shared name, nothing actually shared" problem decision #19 already argued
-against for the technician-scoping mixins. `alerts.py` earns the separation further: it's called
-from three places (the context processor, the alerts view, dismiss's implicit re-check), so a
-single function is what keeps those three from drifting on what "currently an alert" means, the
-same drift argument decision #22 made for `filters.py` itself.
-
-## 28. A protected endpoint instead of a Render scheduled job
+## 19. A protected endpoint instead of a Render scheduled job
 
 **Session 6.**
 
@@ -550,7 +412,7 @@ date interval was never flagged — leaving goal 4 half-met, and specifically th
 opening scenario describes.
 
 Checked directly: Render's Cron Jobs have no free tier — billed per-minute from a $1/mo minimum,
-separate from the free web-service plan this app runs on (decision #4's Neon-not-Render-Postgres
+separate from the free web-service plan this app runs on (decision #3's Neon-not-Render-Postgres
 reasoning was cost-driven for the same underlying reason). Since `check_due_vehicles` already
 existed as a management command with nothing to trigger it on a timer (decision from session 4,
 recorded there as a known gap), the fix is an endpoint an outside scheduler can hit instead of a
@@ -566,7 +428,7 @@ This is a workaround for a hosting constraint, not a design preference — I wou
 closed with an ugly mechanism than left open with a note about it, and on a paid tier this would be a
 scheduled management command instead.
 
-## 29. Seeding demo history by driving the real state machine with time patched, not by hand-building rows
+## 20. Seeding demo history by driving the real state machine with time patched, not by hand-building rows
 
 **Session 6.**
 
@@ -578,7 +440,7 @@ matching `TimelineEvent` rows to look right.
 
 The brief wants a completed seed record to have its full CREATED/BOOKED/STARTED/COMPLETED timeline,
 not a bare row — hand-building that timeline is exactly the kind of second copy of the state
-machine's behaviour decision #22 already argues against elsewhere in this codebase, just applied to
+machine's behaviour decision #15 already argues against elsewhere in this codebase, just applied to
 seed data instead of a view. Patching `timezone.now()` (not `fleet.services.timezone.now` alone)
 means every `auto_now_add`/`auto_now` field touched during the patched block — `TimelineEvent.
 created_at` included — lands on the same backdated instant as the completion itself, so a seeded
@@ -591,7 +453,7 @@ assignments) before recreating the fleet, verified empirically that Django's del
 a CASCADE doesn't route through `TimelineEventQuerySet.delete()`'s override — that guard exists for
 the *application's* code paths, not a data-management script's cleanup of rows it owns outright.
 
-## 30. Overlapping dashboard counts, labelled rather than partitioned
+## 21. Overlapping dashboard counts, labelled rather than partitioned
 
 **Session 6.**
 
@@ -610,30 +472,7 @@ Rather than change the queries, the row now carries a caption stating that the
 counts overlap and that completed services counts records rather than
 vehicles.
 
-## 31. Living with the immutability rule
-
-**Session 6.**
-
-Goal 9's append-only timeline, enforced at the model level (decision #10), then
-blocked me. Clearing leftover test vehicles before seeding demo data meant
-cascading deletes through their service records into timeline events, which the
-model refuses — correctly, and in the admin as much as anywhere.
-
-Two ways out: delete via SQL, bypassing Django since the rule lives in Python
-rather than in a Postgres constraint; or archive the vehicles, which is the
-mechanism goal 2 provides for retiring one without destroying its history.
-
-Archived them. Reaching around a guarantee to tidy test data would have made
-the guarantee conditional, and the retirement path already existed for exactly
-this case.
-
-Worth being precise about what the rule does and does not promise: no code path
-in the application can rewrite history, including a superuser through the
-admin. An operator with direct SQL access still can. A database-level
-constraint would close that, and is the first thing I would add if this were
-production.
-
-## 32. Assignment stays at booking, with guidance instead
+## 22. Assignment stays at booking, with guidance instead
 
 **Session 6.**
 
@@ -655,20 +494,7 @@ differently, which is worse than either.
 
 Fixed the confusion with guidance rather than by moving the field.
 
-## 33. CSS bars instead of a charting library
-
-**Session 6.**
-
-**Chose:** Goal 8's eight-week chart is a div per week, height scaled as a
-percentage of the maximum.
-**Rejected:** Chart.js from a CDN.
-
-Decision #17 committed to no JavaScript and no external dependencies. A
-charting library for one bar chart would have broken that for a view that a
-few lines of CSS handle adequately. Weeks with zero completions still render as
-empty columns — a missing week would be a bug, not a tidy axis.
-
-## 34. A permission enforced on the endpoint, not on the capability
+## 23. A permission enforced on the endpoint, not on the capability
 
 **Session 6.**
 
@@ -712,45 +538,32 @@ first two were always correct, booking is now fixed, and the admin sits outside
 the application's role model entirely — `UserManager.create_user()` hard-codes
 `is_staff=False`, so no fleet manager or technician account can reach it. Only
 a superuser credential provisioned through environment variables can, which is
-the same boundary described for timeline immutability in #31.
+the same boundary described for timeline immutability in #8.
 
-Decision #23 — routing `book_service` through `assign_technician` so there is
+Decision #16 — routing `book_service` through `assign_technician` so there is
 one code path for assignment — made this easier to reason about but did not
 prevent it, because the permission lived on the view rather than in the service
 function. A check inside `assign_technician` itself would have caught every
 caller. That is what I would change with more time.
 
-## 35. Scoping the filter dropdowns asymmetrically
+**Second instance, same session, final review pass:** `ServiceRecordListView`'s
+filter dropdowns had the identical shape. Both were populated from unscoped
+querysets — a technician's "Technician" and "Vehicle" dropdowns listed every
+account and every registration number in the fleet, in controls that could
+never have actually returned them an extra row, since the underlying record
+list was already scoped to their own assignments. Same pattern: a capability
+enforced on its obvious surface (the record list itself, correctly scoped) and
+left open on a sibling nobody had thought of as a scoping decision.
 
-**Session 6, final review.**
+Fixed by scoping only the technician's dropdowns — to technicians and vehicles
+that share a visible record with them — and leaving the manager's alone.
+Scoping both identically has a real cost: a technician with zero assignments
+would silently vanish from a manager's dropdown, removing a filter that
+answers a real question today ("what is this person working on?" — nothing,
+worth being able to see). The two roles are asking different questions of the
+same control, so they get different lists.
 
-**Chose:** A technician's technician-filter dropdown lists only technicians who
-share a visible record with them. A manager's lists every technician account,
-unchanged. The vehicle dropdown is scoped the same way.
-**Rejected:** Scoping both roles identically.
-
-Found in a final review pass: `ServiceRecordListView` populated both filter
-dropdowns from unscoped querysets, while vehicles are carefully scoped
-everywhere else (decision #18). A technician saw every registration number and
-every technician's email in controls that could not have returned them a single
-extra row, since the underlying records are already restricted to their own
-assignments.
-
-The tidy fix — one scoping rule for both roles — has a cost. A technician with
-no assignments appears on no record, so they would silently vanish from a
-manager's dropdown, removing a filter that works today and answers a real
-question ("what is this person working on?" — nothing, which is worth being
-able to see). The two roles are asking different questions of the same control,
-so they get different lists.
-
-Raised by the coding tool rather than implemented unilaterally, on exactly that
-objection. Accepted.
-
-Same shape as #34: a capability enforced on its obvious surface and left open
-on a sibling nobody thought of as a scoping decision. Second instance of the
-pattern in one session.
-
-## 36. Rejecting scheduled dates in the past
+## 24. Rejecting scheduled dates in the past
 
 **Session 6.**
 

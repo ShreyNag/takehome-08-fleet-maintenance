@@ -61,7 +61,7 @@ Three things from this I took directly:
 1. **Decide how "due" is computed before writing any code.** Stored on the
    vehicle versus computed on read is the single decision the rest of the app
    hangs off, and getting it wrong means rewriting the list view, the dashboard
-   and the alerts. See `decisions.md` #7.
+   and the alerts. See `decisions.md` #5.
 2. **Deploy a skeleton on day one, not day six.** Hosting is where a submission
    dies quietly, and free-tier problems are slow to diagnose. This turned out
    to be correct — session 1 lost more time to deployment than to code.
@@ -153,7 +153,9 @@ a claim to defend. I agreed and it became `decisions.md` #1.
 python-dotenv plus dj-database-url. I dropped the latter two: django-environ
 already parses `DATABASE_URL` into Django's nested dict and reads `.env` files,
 so the other two libraries would have added dependencies without adding
-capability. `decisions.md` #3.
+capability. (No longer its own `decisions.md` entry — folded into the
+django-environ reasoning generally, since a library preference this thin
+didn't earn a separate write-up on its own.)
 
 ---
 
@@ -173,7 +175,7 @@ Two free-tier facts came out of this that shaped the submission: Render's free
 services sleep after 15 minutes with a cold start of roughly a minute (noted in
 `SUBMISSION.md` so a slow first load isn't read as a broken deploy), and
 Render's own free Postgres expires 30 days after creation — which is why the
-database is on Neon instead. `decisions.md` #4.
+database is on Neon instead. `decisions.md` #3.
 
 
 ---
@@ -482,7 +484,7 @@ The "do NOT promote the demo manager" instruction is the point of this prompt.
 Adding `is_staff` to the existing manager was the one-line fix, and it would
 have quietly destroyed the ability to demonstrate that role enforcement works
 — a reviewer couldn't tell whether the app's permission checks hold or whether
-superuser rights were carrying them. `decisions.md` #11.
+superuser rights were carrying them. `decisions.md` #9.
 
 ### What went wrong this session
 
@@ -869,7 +871,7 @@ re-reading the brief:
 > strictly
 
 "Can only see and update service records assigned to them" reads more naturally
-as scoping the surrounding context too. That reversal is decision #18.
+as scoping the surrounding context too. That reversal is decision #12.
 
 ---
 
@@ -1025,8 +1027,8 @@ reading the local SQLite fallback. One line settled it:
     print(settings.DATABASES["default"]["ENGINE"])
     django.db.backends.sqlite3
 
-Third instance of the failure mode recorded in decision #12 — reading a proxy
-signal as if it were the thing itself. Sessions 5 and 6 are developed entirely
+Third instance of the failure mode recorded in `plan.md`'s "A pattern I
+noticed" — reading a proxy signal as if it were the thing itself. Sessions 5 and 6 are developed entirely
 locally so the browser, the shell and the tests all read the same database.
 
 ## Session 5 — assignment, cross-vehicle search, CSV import and export
@@ -1084,7 +1086,8 @@ surfacing a technician's work across vehicles yet.
 
 Step 4 is why that came back honestly. A coding agent asked to fix a bug will
 find something to change; naming "nothing is wrong" as a permitted conclusion
-is what prevented an invented fix. Fourth instance of decision #12.
+is what prevented an invented fix. Fourth instance of the same pattern
+(`plan.md`, "A pattern I noticed").
 
 Separately, I asked it to justify a session 4 commit I couldn't account for
 (`e30ada6`). It held up: `book_service` used `.create()` against a
@@ -1108,7 +1111,7 @@ Three improvements on what I'd specified, all accepted:
 - **Three modules, not one.** CSV parsing is an IO concern with no overlap with
   lifecycle rules. Separately, a shared `filters.py` between the list view and
   the export means goal 7's "respect the active filters" can't drift from what
-  goal 6 actually applied. Decision #22.
+  goal 6 actually applied. Decision #15.
 - **Archived as its own rejection reason**, via `Vehicle.all_objects` — a
   manager uploading readings for a van archived last week should be told that,
   not told it doesn't exist.
@@ -1120,13 +1123,15 @@ Three improvements on what I'd specified, all accepted:
 
 **Silent sort fallback.** It proposed swallowing an unrecognised sort
 parameter. Inconsistent with a codebase where illegal transitions were built
-to explain themselves. Fall back, but say so. Decision #24.
+to explain themselves. Fall back, but say so. (Small enough that it isn't
+its own `decisions.md` entry any more — the one detail worth keeping, the
+sort allowlist guarding against an injection surface, now lives inside #15.)
 
 **Suppressing the assignment event on booking.** It proposed a
 `write_event=False` flag so an existing single-event test would keep passing.
 Goal 9 requires every assignment in the timeline. The test encoded an
 assumption from before assignment was a first-class action, so the test
-changed instead. Decision #23.
+changed instead. Decision #16.
 
 The principle: changing a test because requirements grew is legitimate.
 Changing behaviour to keep a test green inverts which is authoritative.
@@ -1311,7 +1316,7 @@ confirmed a headerless file parses and a non-CSV upload is rejected cleanly.
 > scheduled job support.
 
 The instruction worth highlighting is the chart. Goal 8 wants one and decision
-#17 forbids JavaScript; that tension needed resolving in the prompt rather than
+#11 forbids JavaScript; that tension needed resolving in the prompt rather than
 being discovered mid-implementation. Also specified: reuse the existing
 `with_service_status()` annotation and `overdue()` filter rather than
 reimplementing the grace period a fourth time, and an `assertNumQueries` test so
@@ -1321,12 +1326,12 @@ in at five queries total.
 ### What it flagged back
 
 **Render's free tier has no cron.** Confirmed by searching rather than assumed,
-and it built a token-authenticated endpoint instead. Decision #28.
+and it built a token-authenticated endpoint instead. Decision #19.
 
 **The dashboard counts overlap.** Raised unprompted: "due" includes overdue
 vehicles as a subset, so due + overdue is not a clean partition. I then misread
 the row myself when I looked at the seeded data, which settled it — if the
-person who built it misreads it, it needs a caption. Decision #30.
+person who built it misreads it, it needs a caption. Decision #21.
 
 ### Running the seed against production
 
@@ -1401,7 +1406,7 @@ isolated it to the session cookie.
 **A create form that did not explain itself.** The service record form asks only
 for a description, and I wondered where technician assignment had gone. It
 belongs at booking, and moving it earlier would break the lifecycle — decision
-#32. Fixed with helper text rather than by moving the field.
+#22. Fixed with helper text rather than by moving the field.
 
 Neither was caught by 162 passing tests, because both are questions about
 whether the app makes sense to use rather than whether it behaves correctly.
@@ -1457,4 +1462,4 @@ alone: assign, unassign, booking, and the Django admin. No fourth surprise.
 
 Worth recording that 162 passing tests did not catch this, and neither did the
 prompts that specified the permission, because both were framed around the
-endpoint rather than the capability. Decision #34.
+endpoint rather than the capability. Decision #23.

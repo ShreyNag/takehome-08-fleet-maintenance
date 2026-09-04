@@ -52,7 +52,7 @@ Not run by `build.sh` — deliberately run by hand, not on every deploy. It clea
 previously-seeded vehicles first (matched by the `FC-DEMO-` registration-number prefix) and never
 touches the `seed_users` accounts, so it's safe to re-run.
 
-Render's free tier has no Shell (that's a paid feature — see decision #5 in `docs/decisions.md`),
+Render's free tier has no Shell (that's a paid feature — see decision #4 in `docs/decisions.md`),
 so run it locally against the deployed database instead of on Render itself:
 
 1. Make sure `python manage.py seed_users` has already been run against that database (`seed_demo`

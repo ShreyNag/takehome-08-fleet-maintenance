@@ -173,14 +173,14 @@ Four mixins, split into two pairs. Queryset-scoping mixins restrict what a
 technician sees; object-level mixins produce 403 rather than 404 on an
 unauthorised record or vehicle. Vehicles and records need separate
 implementations because scoping records is one M2M hop while scoping vehicles
-is a reverse-FK-then-M2M traversal needing `.distinct()` — decision #19.
+is a reverse-FK-then-M2M traversal needing `.distinct()` — decision #13.
 
 Authorisation is enforced per capability, not per endpoint name — a lesson
 learned the hard way. Booking creates a technician assignment as a side effect
 of a status transition, so it needs the same manager-only gate as the endpoint
 actually called "assign". Every path that can create or delete a
 `ServiceAssignment` row is manager-gated: the assign view, the unassign view,
-and booking. See decision #34.
+and booking. See decision #23.
 
 The Django admin sits outside this role model by design. It is gated on
 `is_staff`, which `UserManager.create_user()` hard-codes to `False`, so no
@@ -206,7 +206,7 @@ fix, and was not worth the migration and maintenance cost here.
 **A charting library.** Goal 8's eight-week chart is CSS-scaled divs. Pulling
 in Chart.js and a CDN dependency for one view was not worth it.
 
-**Any CSS framework or JavaScript.** Decision #17. The assignment scores the
+**Any CSS framework or JavaScript.** Decision #11. The assignment scores the
 ten goals, and every hour on presentation is an hour not on them.
 
 **Database-level immutability.** The append-only rule on `TimelineEvent` is

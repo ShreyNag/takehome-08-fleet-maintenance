@@ -1341,7 +1341,7 @@ class ServiceRecordListViewTests(TestCase):
         # tech_a is assigned to record_1 (on vehicle_1) only -- vehicle_2
         # never appears for them, even though it's a valid registration in
         # the fleet, same rule VehicleListView already enforces (goal 5's
-        # scoping, decision #18) and the same shape as the booking-
+        # scoping, decision #12) and the same shape as the booking-
         # permission bug: a capability locked down on its named surface
         # (the vehicle list) and left open on a sibling one (this dropdown).
         self.client.force_login(self.tech_a)
@@ -2245,7 +2245,7 @@ class SeedDemoCommandTests(TestCase):
             },
         )
         # CREATED(1) + booking's STATUS_CHANGED + TECHNICIAN_ASSIGNED pair
-        # (decision #23 -- booking writes both) + start's STATUS_CHANGED(1)
+        # (decision #16 -- booking writes both) + start's STATUS_CHANGED(1)
         # + complete's STATUS_CHANGED(1) = 5 timeline rows in total.
         self.assertEqual(completed.timeline.count(), 5)
 

@@ -53,7 +53,7 @@ class DashboardView(FleetManagerRequiredMixin, TemplateView):
     """Goal 8: the manager's landing page. Manager-only -- a technician's
     landing page is ServiceRecordListView (goal 5); requesting this URL
     directly gets the same 403 FleetManagerRequiredMixin gives every other
-    manager-only view, not a redirect (decision #16).
+    manager-only view, not a redirect.
 
     All the actual aggregation lives in fleet.dashboard.dashboard_context
     so it can be unit-tested (query count included) without going through
@@ -83,7 +83,7 @@ class AlertListView(FleetManagerRequiredMixin, ListView):
 
 class AlertDismissView(FleetManagerRequiredMixin, SingleObjectMixin, View):
     """POST-only (goal 10 says dismissal is a state change, consistent with
-    archive/restore -- decision #14). get_object() is deliberately NOT
+    archive/restore). get_object() is deliberately NOT
     scoped to overdue_alerts(): dismissing a record that's already been
     completed or already dismissed by someone else should be a well-defined
     no-op via get_or_create, not a 404, same reasoning as

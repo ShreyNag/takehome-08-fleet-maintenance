@@ -164,3 +164,40 @@ JavaScript, and database-level enforcement of the timeline's immutability.
 No stretch ideas were attempted. The brief is explicit that they never
 substitute for a goal, and the remaining time went to closing goal 4's
 scheduling gap and to documentation instead.
+
+## A pattern I noticed
+
+**Sessions 1 and 2.** Not a design decision, but a working practice I changed
+after making the same mistake twice — moved here from `decisions.md`, which
+is decisions with alternatives, not this.
+
+In session 1, Render reported a successful deploy while `seed_users` had
+failed silently, and the only symptom was a login rejecting valid credentials.
+In session 2, I loaded the live URL expecting to see changes, saw none, and
+assumed the migration had failed — I had committed locally but not pushed, so
+Render had nothing new to deploy. Session 2 also shipped no UI at all, so even
+after pushing, the front page was never going to look different.
+
+Both are the same error: trusting a proxy signal instead of the thing itself.
+A green deploy badge is not a working app, and an unchanged page is not
+evidence of an unchanged database. From session 3 onward I verify by querying
+Neon or opening the admin, and I develop against a local SQLite server rather
+than round-tripping through Render.
+
+**Third instance, session 4:** an empty `manage.py shell` query read as broken
+lifecycle logic, when the shell was on local SQLite and the data was in Neon.
+The pattern is consistent enough now to be a working practice rather than three
+mishaps: before concluding anything is broken, confirm which surface is being
+read. Sessions 5 and 6 are developed entirely locally so the browser, the
+shell and the tests all agree.
+
+**Fourth instance, session 5:** I reported a bug — a technician could not see a
+record assigned to them — and asked for a fix. The diagnosis came back
+category 4 of the four possibilities the prompt listed: nothing was broken. The
+record was reachable directly; there was simply no cross-vehicle list surfacing
+it yet, which was the next thing being built. Same shape as the other three:
+an absent surface read as broken logic.
+
+Worth recording that the prompt asking it to *diagnose before fixing*, with an
+explicit "if it is this, say so and stop," is what prevented it from
+manufacturing a fix for a bug that did not exist.

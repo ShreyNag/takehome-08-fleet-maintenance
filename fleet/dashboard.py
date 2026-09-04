@@ -86,7 +86,7 @@ def _weekly_completions():
             "label": week.strftime("%b %d"),
             "count": count,
             # Height as a percentage of the tallest bar in the window --
-            # the CSS-only chart goal 8 asks for (decision #17): a div per
+            # the CSS-only chart goal 8 asks for (decision #11): a div per
             # week, height set inline from this number, no JS/canvas/CDN.
             "pct": round(count / max_count * 100) if max_count else 0,
         }
