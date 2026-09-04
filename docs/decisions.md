@@ -304,43 +304,8 @@ third copy is how those quietly diverge.
 Case ordering matters: OVERDUE is tested before DUE, since an overdue record
 is also an open one and `Case` returns on first match.
 
-## 15. Three modules, not one service layer
 
-**Session 5.**
-
-**Chose:** `assign_technician` / `unassign_technician` in `services.py`
-alongside the transition functions; scoping, search, filter and sort logic in a
-new `filters.py`; CSV parsing, validation, report generation and export
-serialisation in a new `csv_io.py`.
-**Rejected:** Everything in `services.py`, as originally specified.
-
-Decision from session 4 was that business logic lives in one place so there is
-one file to point at. That holds for lifecycle rules. It does not extend to
-CSV parsing, which is an IO concern with its own problems — BOM handling, CRLF,
-header detection, six rejection paths — and would have doubled the length of
-`services.py` without sharing anything with it.
-
-`filters.py` earns its place differently: goal 7 requires the export to respect
-the active filters, and goal 6 requires the list view to apply them. One module
-used by both means the two cannot drift. Two copies of the same filter logic is
-a bug waiting to be reported as "the export doesn't match what I was looking
-at." The sort parameter it exposes is validated against an allowlist before
-reaching `order_by()` — passing an arbitrary column name through is an
-injection surface — one check shared by both call sites rather than two.
-
-Proposed by the coding tool in response to a prompt that left the structure
-open. Accepted on the drift argument.
-
-**Session 6:** two more read-only modules followed the same split-by-concern
-rule — `dashboard.py` for goal 8's aggregation, `alerts.py` for goal 10's
-overdue-and-undismissed queryset. Both are read-only like `filters.py`, but
-neither is "scope/filter/sort the record list," so they earned their own
-files rather than being folded in. `alerts.py` especially: it's called from
-three places (the nav badge, the alerts view, dismiss's own re-check), so one
-function is what keeps those three from drifting on what "currently an alert"
-means.
-
-## 16. Writing the assignment event on booking
+## 15. Writing the assignment event on booking
 
 **Session 5.**
 
@@ -364,7 +329,7 @@ assignment existed as a first-class action; changing a test because
 requirements grew is legitimate, suppressing an audit event to keep a test green
 is not.
 
-## 17. `icontains` over Postgres full-text search
+## 16. `icontains` over Postgres full-text search
 
 **Session 5.**
 
@@ -379,7 +344,7 @@ vector, and a different query API — time better spent on goals 8 and 10.
 Recorded in a comment at the call site as the fix if it ever gets slow, and in
 `schema.md` as the second thing that breaks at 100x.
 
-## 18. "Due" and "in service" read off ServiceRecord.status, not off with_service_status()
+## 17. "Due" and "in service" read off ServiceRecord.status, not off with_service_status()
 
 **Session 6.**
 
@@ -398,7 +363,7 @@ where the alternative really would be re-deriving the grace-period comparison.
 Verified with a regression test (`test_in_service_vehicle_is_not_also_counted_as_due`) after an
 earlier draft caught exactly this double-count against fixture data.
 
-## 19. A protected endpoint instead of a Render scheduled job
+## 18. A protected endpoint instead of a Render scheduled job
 
 **Session 6.**
 
@@ -428,7 +393,7 @@ This is a workaround for a hosting constraint, not a design preference — I wou
 closed with an ugly mechanism than left open with a note about it, and on a paid tier this would be a
 scheduled management command instead.
 
-## 20. Seeding demo history by driving the real state machine with time patched, not by hand-building rows
+## 19. Seeding demo history by driving the real state machine with time patched, not by hand-building rows
 
 **Session 6.**
 
@@ -453,7 +418,7 @@ assignments) before recreating the fleet, verified empirically that Django's del
 a CASCADE doesn't route through `TimelineEventQuerySet.delete()`'s override — that guard exists for
 the *application's* code paths, not a data-management script's cleanup of rows it owns outright.
 
-## 21. Overlapping dashboard counts, labelled rather than partitioned
+## 20. Overlapping dashboard counts, labelled rather than partitioned
 
 **Session 6.**
 
@@ -472,7 +437,7 @@ Rather than change the queries, the row now carries a caption stating that the
 counts overlap and that completed services counts records rather than
 vehicles.
 
-## 22. Assignment stays at booking, with guidance instead
+## 21. Assignment stays at booking, with guidance instead
 
 **Session 6.**
 
@@ -494,7 +459,7 @@ differently, which is worse than either.
 
 Fixed the confusion with guidance rather than by moving the field.
 
-## 23. A permission enforced on the endpoint, not on the capability
+## 22. A permission enforced on the endpoint, not on the capability
 
 **Session 6.**
 
@@ -563,7 +528,7 @@ answers a real question today ("what is this person working on?" — nothing,
 worth being able to see). The two roles are asking different questions of the
 same control, so they get different lists.
 
-## 24. Rejecting scheduled dates in the past
+## 23. Rejecting scheduled dates in the past
 
 **Session 6.**
 
