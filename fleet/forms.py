@@ -23,6 +23,33 @@ class VehicleForm(forms.ModelForm):
             "service_interval_km",
         ]
 
+    def clean_registration_number(self):
+        # ModelForm's automatic uniqueness check (Model.validate_unique(),
+        # via Model._perform_unique_checks()) queries Vehicle._default_manager
+        # -- which is Vehicle.objects, the first-declared manager, and
+        # excludes archived vehicles (see the Vehicle docstring on why that's
+        # the default). registration_number is unique at the DB level across
+        # EVERY row though, archived included, so a plate that belongs to an
+        # archived vehicle sails past that automatic check, then fails at
+        # save() with an uncaught IntegrityError -- a 500, not a form error.
+        # This checks against Vehicle.all_objects instead, so the conflict
+        # is always caught here, before save() is ever called.
+        registration_number = self.cleaned_data["registration_number"]
+        conflict = Vehicle.all_objects.filter(registration_number=registration_number)
+        if self.instance.pk:
+            conflict = conflict.exclude(pk=self.instance.pk)
+        existing = conflict.first()
+        if existing is not None:
+            if existing.is_archived:
+                raise forms.ValidationError(
+                    "This registration number belongs to an archived vehicle. "
+                    "Archiving preserves history rather than freeing the plate "
+                    "-- restore that vehicle to reuse it, or choose a different "
+                    "registration number."
+                )
+            raise forms.ValidationError("A vehicle with this registration number already exists.")
+        return registration_number
+
 
 class ServiceRecordDescriptionForm(forms.ModelForm):
     class Meta:

@@ -235,6 +235,96 @@ class VehiclePermissionTests(TestCase):
         self.assertFalse(self.vehicle.is_archived)
 
 
+class VehicleRegistrationUniquenessTests(TestCase):
+    """Bug fix: registration_number is unique at the DB level across every
+    vehicle, archived included, but Vehicle.objects (the model's
+    _default_manager, since it's declared first -- see the Vehicle
+    docstring) excludes archived rows, and that's what ModelForm's
+    automatic validate_unique() queries against. A duplicate against an
+    ARCHIVED vehicle's plate used to sail past form validation and only
+    fail at save() with an uncaught IntegrityError -- a 500, not a form
+    error. VehicleForm.clean_registration_number() now checks against
+    Vehicle.all_objects instead, so every conflict, archived or not, is
+    caught before save() is ever called."""
+
+    def setUp(self):
+        self.manager = make_user("vreg-mgr@example.com", User.Role.FLEET_MANAGER)
+        self.active = make_vehicle(registration_number="VREG-ACTIVE")
+        self.archived = make_vehicle(registration_number="VREG-ARCHIVED", is_archived=True)
+        self.client.force_login(self.manager)
+
+    def _payload(self, **overrides):
+        payload = {
+            "registration_number": "VREG-NEW",
+            "make": "Ford",
+            "model": "Transit",
+            "current_odometer": 500,
+            "service_interval_days": 90,
+            "service_interval_km": 8_000,
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_create_with_existing_active_registration_is_a_form_error_not_a_500(self):
+        response = self.client.post(reverse("vehicle-create"), self._payload(registration_number="VREG-ACTIVE"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "already exists",
+            " ".join(response.context["form"].errors["registration_number"]),
+        )
+        self.assertEqual(Vehicle.all_objects.filter(registration_number="VREG-ACTIVE").count(), 1)
+
+    def test_create_with_archived_registration_is_a_form_error_that_explains_why(self):
+        response = self.client.post(reverse("vehicle-create"), self._payload(registration_number="VREG-ARCHIVED"))
+        self.assertEqual(response.status_code, 200)
+        message = " ".join(response.context["form"].errors["registration_number"])
+        self.assertIn("archived", message.lower())
+        self.assertEqual(Vehicle.all_objects.filter(registration_number="VREG-ARCHIVED").count(), 1)
+
+    def test_create_with_unique_registration_succeeds(self):
+        response = self.client.post(reverse("vehicle-create"), self._payload())
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(Vehicle.objects.filter(registration_number="VREG-NEW").exists())
+
+    def test_edit_to_existing_active_registration_is_a_form_error_not_a_500(self):
+        other = make_vehicle(registration_number="VREG-OTHER")
+        response = self.client.post(
+            reverse("vehicle-update", args=[other.pk]),
+            self._payload(registration_number="VREG-ACTIVE"),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "already exists",
+            " ".join(response.context["form"].errors["registration_number"]),
+        )
+        other.refresh_from_db()
+        self.assertEqual(other.registration_number, "VREG-OTHER")
+
+    def test_edit_to_archived_registration_is_a_form_error_that_explains_why(self):
+        other = make_vehicle(registration_number="VREG-OTHER2")
+        response = self.client.post(
+            reverse("vehicle-update", args=[other.pk]),
+            self._payload(registration_number="VREG-ARCHIVED"),
+        )
+        self.assertEqual(response.status_code, 200)
+        message = " ".join(response.context["form"].errors["registration_number"])
+        self.assertIn("archived", message.lower())
+        other.refresh_from_db()
+        self.assertEqual(other.registration_number, "VREG-OTHER2")
+
+    def test_editing_a_vehicle_without_changing_its_own_registration_still_succeeds(self):
+        # Guards against the exclude-self logic in clean_registration_number
+        # regressing into treating a vehicle's own unchanged plate as a
+        # conflict with itself.
+        response = self.client.post(
+            reverse("vehicle-update", args=[self.active.pk]),
+            self._payload(registration_number="VREG-ACTIVE", make="Renamed"),
+        )
+        self.assertEqual(response.status_code, 302)
+        self.active.refresh_from_db()
+        self.assertEqual(self.active.make, "Renamed")
+
+
 class ArchivedVehicleVisibilityTests(TestCase):
     """Goal 2: archiving hides a vehicle from the default list without
     touching its service history."""
